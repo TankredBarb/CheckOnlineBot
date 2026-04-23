@@ -40,10 +40,12 @@ void BotManager::onNewMessage(const TgMessage& msg)
 
     if (cmd == "/playercount" || cmd.startsWith("/playercount@"))
     {
-        m_targetChatId = msg.chatId;
-        m_targetTopicId = msg.messageThreadId;
+        // Create context for this specific user request
+        RequestContext ctx;
+        ctx.chatId = msg.chatId;
+        ctx.topicId = msg.messageThreadId;
 
-        fetchAndBroadcast();
+        fetchAndBroadcast(ctx);
     }
     else if (cmd == "/start")
     {
@@ -51,27 +53,43 @@ void BotManager::onNewMessage(const TgMessage& msg)
     }
 }
 
-void BotManager::fetchAndBroadcast()
+void BotManager::fetchAndBroadcast(const RequestContext& context)
 {
     if (m_fetching)
     {
+        qDebug() << "[BotManager] Request already in progress, ignoring new one.";
         return;
     }
+
     m_fetching = true;
-    m_steam->requestCurrentPlayers(Config::STEAM_APP_IDS);
+    m_requestCounter++;
+
+    // Store context associated with this unique request ID
+    m_pendingRequests[m_requestCounter] = context;
+    qDebug() << "[BotManager] Created request ID:" << m_requestCounter;
+
+    m_steam->requestCurrentPlayers(Config::STEAM_APP_IDS, m_requestCounter);
 }
 
-void BotManager::onSteamDataReady(const QMap<int, int>& data)
+void BotManager::onSteamDataReady(const QMap<int, int>& data, int requestId)
 {
     m_fetching = false;
 
-    if (m_targetChatId == 0) return;
+    // Retrieve the context for this specific request
+    if (m_pendingRequests.contains(requestId))
+    {
+        RequestContext ctx = m_pendingRequests.take(requestId); // take() removes and returns
 
-    QString report = formatReport(data);
-    m_tg->sendMessage(m_targetChatId, report, m_targetTopicId);
-
-    m_targetChatId = 0;
-    m_targetTopicId = 0;
+        if (ctx.chatId != 0)
+        {
+            QString report = formatReport(data);
+            m_tg->sendMessage(ctx.chatId, report, ctx.topicId);
+        }
+    }
+    else
+    {
+        qWarning() << "[BotManager] Received data for unknown request ID:" << requestId;
+    }
 }
 
 void BotManager::scheduleTick()
@@ -79,11 +97,13 @@ void BotManager::scheduleTick()
     // Only broadcast if channel ID is configured
     if (Config::TARGET_CHAT_ID != 0)
     {
-        m_targetChatId = Config::TARGET_CHAT_ID;
-        m_targetTopicId = Config::TARGET_TOPIC_ID;
+        // Create context for the scheduled broadcast
+        RequestContext ctx;
+        ctx.chatId = Config::TARGET_CHAT_ID;
+        ctx.topicId = Config::TARGET_TOPIC_ID;
 
         qDebug() << "[BotManager] Scheduled broadcast triggered.";
-        fetchAndBroadcast();
+        fetchAndBroadcast(ctx);
     }
     scheduleNextRun();
 }

@@ -5,15 +5,13 @@
 #include <QUrlQuery>
 #include <QDebug>
 
-SteamApi::SteamApi(QObject* parent)
-    : QObject(parent)
-{
-}
+SteamApi::SteamApi(QObject* parent) : QObject(parent) {}
 
-void SteamApi::requestCurrentPlayers(const QList<int>& appIds)
+void SteamApi::requestCurrentPlayers(const QList<int>& appIds, int requestId)
 {
     m_expectedCount = appIds.size();
     m_tempResults.clear();
+    m_currentRequestId = requestId; // Associate this batch with the ID
 
     for (int id : appIds)
     {
@@ -22,7 +20,6 @@ void SteamApi::requestCurrentPlayers(const QList<int>& appIds)
 
         QUrl url(urlString);
         QNetworkRequest request(url);
-
         request.setTransferTimeout(5000);
 
         QNetworkReply* reply = m_net.get(request);
@@ -33,14 +30,10 @@ void SteamApi::requestCurrentPlayers(const QList<int>& appIds)
 void SteamApi::onSteamReplyFinished()
 {
     auto* reply = qobject_cast<QNetworkReply*>(sender());
-    if (!reply)
-    {
-        return;
-    }
+    if (!reply) return;
 
     QUrlQuery query(reply->url());
     int appId = query.queryItemValue("appid").toInt();
-
     int players = -1;
 
     if (reply->error() == QNetworkReply::NoError)
@@ -69,8 +62,9 @@ void SteamApi::onSteamReplyFinished()
     m_tempResults[appId] = players;
     reply->deleteLater();
 
+    // When all requests in this batch are done
     if (--m_expectedCount <= 0)
     {
-        emit playersDataReady(m_tempResults);
+        emit playersDataReady(m_tempResults, m_currentRequestId);
     }
 }
