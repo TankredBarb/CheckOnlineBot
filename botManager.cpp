@@ -14,31 +14,40 @@ BotManager::BotManager(TelegramClient* tg, SteamApi* steam, QObject* parent)
 
 void BotManager::start()
 {
+    if (Config::TG_TOKEN.isEmpty()) {
+        qCritical() << "[BotManager] ERROR: TG_BOT_TOKEN is not set in environment variables!";
+        return;
+    }
+
     m_tg->startPolling();
+
+    qDebug() << "[BotManager] Started.";
+    qDebug() << "[BotManager] Target Channel ID:" << Config::TARGET_CHAT_ID
+             << "Target Topic ID:" << Config::TARGET_TOPIC_ID;
+
+    if (Config::TARGET_CHAT_ID != 0) {
+        qDebug() << "[BotManager] Scheduled broadcasts ENABLED for channel.";
+    } else {
+        qDebug() << "[BotManager] Scheduled broadcasts DISABLED (no channel ID configured).";
+    }
+
     scheduleNextRun();
-    qDebug() << "[BotManager] Started. Next broadcast at"
-             << QDateTime::currentDateTime().addMSecs(msecToNextScheduledTime()).toString("dd.MM.yyyy HH:mm:ss");
 }
 
 void BotManager::onNewMessage(const TgMessage& msg)
 {
     QString cmd = msg.text.trimmed().toLower();
 
-    // Check for command (supports both /playercount and /playercount@BotName)
     if (cmd == "/playercount" || cmd.startsWith("/playercount@"))
     {
-        // Route response to the exact chat and topic where command was received
         m_targetChatId = msg.chatId;
         m_targetTopicId = msg.messageThreadId;
-
-        qDebug() << "[BotManager] Command received. Chat:" << m_targetChatId
-                 << "Topic:" << m_targetTopicId;
 
         fetchAndBroadcast();
     }
     else if (cmd == "/start")
     {
-        m_tg->sendMessage(msg.chatId, "Bot started. Use /playercount to check stats.", msg.messageThreadId);
+        m_tg->sendMessage(msg.chatId, "🤖 Bot started. Use /playercount to check stats.", msg.messageThreadId);
     }
 }
 
@@ -46,7 +55,6 @@ void BotManager::fetchAndBroadcast()
 {
     if (m_fetching)
     {
-        qDebug() << "[BotManager] Request already in progress, ignoring new one.";
         return;
     }
     m_fetching = true;
@@ -56,38 +64,26 @@ void BotManager::fetchAndBroadcast()
 void BotManager::onSteamDataReady(const QMap<int, int>& data)
 {
     m_fetching = false;
+
+    if (m_targetChatId == 0) return;
+
     QString report = formatReport(data);
+    m_tg->sendMessage(m_targetChatId, report, m_targetTopicId);
 
-    if (m_targetChatId != 0)
-    {
-        m_tg->sendMessage(m_targetChatId, report, m_targetTopicId);
-
-        // Reset state
-        m_targetChatId = 0;
-        m_targetTopicId = 0;
-    }
-    else
-    {
-        qWarning() << "[BotManager] No target chat ID set for response.";
-    }
+    m_targetChatId = 0;
+    m_targetTopicId = 0;
 }
 
 void BotManager::scheduleTick()
 {
-    // Scheduled broadcast goes strictly to the configured Target Chat/Topic
+    // Only broadcast if channel ID is configured
     if (Config::TARGET_CHAT_ID != 0)
     {
         m_targetChatId = Config::TARGET_CHAT_ID;
-        m_targetTopicId = Config::TARGET_TOPIC_ID; // Use the specific release topic ID
+        m_targetTopicId = Config::TARGET_TOPIC_ID;
 
-        qDebug() << "[BotManager] Scheduled broadcast triggered for Chat:"
-                 << m_targetChatId << "Topic:" << m_targetTopicId;
-
+        qDebug() << "[BotManager] Scheduled broadcast triggered.";
         fetchAndBroadcast();
-    }
-    else
-    {
-        qDebug() << "[BotManager] TARGET_CHAT_ID not configured, skipping scheduled broadcast.";
     }
     scheduleNextRun();
 }
@@ -113,29 +109,24 @@ void BotManager::scheduleNextRun()
     m_scheduleTimer.start(delay);
 }
 
-
 QString BotManager::formatReport(const QMap<int, int>& data)
 {
     int d2Count = data.value(Config::DESTINY_ID, -1);
     int marCount = data.value(Config::MARATHON_ID, -1);
 
-    // Format numbers with locale-aware thousand separators, monospace font for alignment
     QString d2Str = d2Count >= 0 ? QString("<code>%1</code>").arg(QLocale().toString(d2Count)) : "<code>❌ N/A</code>";
     QString marStr = marCount >= 0 ? QString("<code>%1</code>").arg(QLocale().toString(marCount)) : "<code>❌ N/A</code>";
 
-    // Resolve Kyiv timezone and format current time
     QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
     QString timeStr = QDateTime::currentDateTimeUtc()
                           .toTimeZone(tz)
                           .toString("HH:mm (dd.MM.yyyy)");
 
-    // Build clickable Steam store links with bold text
     QString d2Link = QString("<a href=\"https://store.steampowered.com/app/%1/\"><b>Destiny 2</b></a>")
                          .arg(Config::DESTINY_ID);
     QString marLink = QString("<a href=\"https://store.steampowered.com/app/%1/\"><b>Marathon</b></a>")
                           .arg(Config::MARATHON_ID);
 
-    // Visual separator for clean structure
     const QString separator = "━━━━━━━━━━━━━━━━━━━━";
 
     return QString("📊 <b>Steam Online Report</b>\n"
