@@ -1,13 +1,13 @@
 #pragma once
 #include <QObject>
 #include <QNetworkAccessManager>
-#include <QTimer>
+#include <QMap>
 
 struct TgMessage
 {
-    qint64 chatId = 0;
+    qint64 chatId;
+    qint64 messageThreadId;  // Для форум-топиков (может быть 0)
     QString text;
-    qint64 messageThreadId = 0; // 0 for DMs/Groups, specific ID for Forum topics
 };
 
 class TelegramClient : public QObject
@@ -22,12 +22,14 @@ signals:
     void messageReceived(const TgMessage& msg);
 
 private slots:
-    void pollUpdates();
-    void handleUpdatesReply();
+    void onPollReplyFinished();
+    void onSendReplyFinished();
 
 private:
-    QString m_token;
+    void sendRequest(const QString& method, const QMap<QString, QString>& params);
+    void processUpdate(const QJsonObject& update);
+
     QNetworkAccessManager m_net;
-    QTimer m_pollTimer;
+    QString m_token;
     qint64 m_offset = 0;
 };

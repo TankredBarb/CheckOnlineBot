@@ -16,6 +16,8 @@ add_executable(CheckOnlineBot
     steamApi.cpp
     botManager.h
     botManager.cpp
+    popularityApi.h
+    popularityApi.cpp
 )
 
 target_link_libraries(CheckOnlineBot Qt6::Core Qt6::Network)

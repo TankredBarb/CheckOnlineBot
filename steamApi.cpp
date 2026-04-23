@@ -1,28 +1,33 @@
 #include "steamApi.h"
+#include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QUrlQuery>
 #include <QDebug>
+#include <QUrlQuery>
 
-SteamApi::SteamApi(QObject* parent) : QObject(parent) {}
+SteamApi::SteamApi(QObject* parent) : QObject(parent)
+{
+}
 
 void SteamApi::requestCurrentPlayers(const QList<int>& appIds, int requestId)
 {
     m_expectedCount = appIds.size();
-    m_tempResults.clear();
-    m_currentRequestId = requestId; // Associate this batch with the ID
+    m_tempPlayers.clear();
+    m_currentRequestId = requestId;
 
-    for (int id : appIds)
+    for (int appId : appIds)
     {
-        QString urlString = QString("https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/"
-                                    "?appid=%1&format=json").arg(id);
+        QUrl url("https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/");
+        QUrlQuery query;
+        query.addQueryItem("appid", QString::number(appId));
+        url.setQuery(query);
 
-        QUrl url(urlString);
         QNetworkRequest request(url);
-        request.setTransferTimeout(5000);
+        request.setTransferTimeout(8000); // 8 second timeout
 
         QNetworkReply* reply = m_net.get(request);
+        reply->setProperty("appId", appId);
         connect(reply, &QNetworkReply::finished, this, &SteamApi::onSteamReplyFinished);
     }
 }
@@ -30,41 +35,57 @@ void SteamApi::requestCurrentPlayers(const QList<int>& appIds, int requestId)
 void SteamApi::onSteamReplyFinished()
 {
     auto* reply = qobject_cast<QNetworkReply*>(sender());
-    if (!reply) return;
+    if (!reply)
+        return;
 
-    QUrlQuery query(reply->url());
-    int appId = query.queryItemValue("appid").toInt();
+    int appId = reply->property("appId").toInt();
+    QString error;
     int players = -1;
 
-    if (reply->error() == QNetworkReply::NoError)
+    if (reply->error() != QNetworkReply::NoError)
     {
-        QByteArray data = reply->readAll();
-        QJsonDocument doc = QJsonDocument::fromJson(data);
-
-        if (!doc.isNull() && doc.isObject())
+        error = QString("Network error: %1").arg(reply->errorString());
+    }
+    else
+    {
+        int httpCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (httpCode != 200)
         {
-            QJsonObject root = doc.object();
-            if (root.contains("response"))
+            error = QString("Steam server returned status %1").arg(httpCode);
+        }
+        else
+        {
+            QByteArray data = reply->readAll();
+            QJsonDocument doc = QJsonDocument::fromJson(data);
+            if (doc.isNull() || !doc.isObject())
             {
+                error = "Invalid data format from Steam";
+            }
+            else
+            {
+                QJsonObject root = doc.object();
                 QJsonObject response = root["response"].toObject();
-                if (response.contains("player_count"))
+                if (response.contains("player_count") && response["player_count"].isDouble())
                 {
-                    players = response["player_count"].toInt();
+                    players = static_cast<int>(response["player_count"].toDouble());
+                }
+                else
+                {
+                    error = "Steam API did not return player_count field";
                 }
             }
         }
     }
-    else
+
+    if (players >= 0)
     {
-        qWarning() << "Steam API Error for AppID" << appId << ":" << reply->errorString();
+        m_tempPlayers[appId] = players;
     }
 
-    m_tempResults[appId] = players;
     reply->deleteLater();
 
-    // When all requests in this batch are done
     if (--m_expectedCount <= 0)
     {
-        emit playersDataReady(m_tempResults, m_currentRequestId);
+        emit playersDataReady(m_tempPlayers, error, m_currentRequestId);
     }
 }
