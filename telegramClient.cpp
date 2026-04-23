@@ -44,6 +44,7 @@ void TelegramClient::sendMessage(qint64 chatId, const QString& text, qint64 mess
 void TelegramClient::sendRequest(const QString& method, const QMap<QString, QString>& params)
 {
     QUrl url("https://api.telegram.org/bot" + m_token + "/" + method);
+
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 

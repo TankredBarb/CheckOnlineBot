@@ -140,7 +140,10 @@ void BotManager::scheduleTick()
 {
     if (Config::TARGET_CHAT_ID != 0)
     {
-        RequestContext ctx{Config::TARGET_CHAT_ID, Config::TARGET_TOPIC_ID};
+        RequestContext ctx;
+        ctx.chatId = Config::TARGET_CHAT_ID;
+        ctx.topicId = 0;
+
         qDebug() << "[BotManager] Scheduled broadcast triggered.";
         fetchAndBroadcast(ctx);
     }
@@ -152,7 +155,8 @@ qint64 BotManager::msecToNextScheduledTime()
     QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
     QDateTime now = QDateTime::currentDateTimeUtc().toTimeZone(tz);
     QDateTime target = now;
-    target.setTime(QTime(Config::SCHEDULE_HOUR, 0, 0));
+    target.setTime(QTime(Config::SCHEDULE_HOUR, Config::SCHEDULE_MINUTES, 0));
+
     if (now >= target)
         target = target.addDays(1);
     return now.msecsTo(target);

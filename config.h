@@ -26,5 +26,6 @@ namespace Config
     // --- Behavior ---
     inline const QString KYIV_TIMEZONE = "Europe/Kyiv";
     inline const int SCHEDULE_HOUR = 21;
+    inline const int SCHEDULE_MINUTES = 0;
     inline const int POLL_INTERVAL_MS = 2500;
 }
