@@ -5,12 +5,20 @@
 #include <QTimeZone>
 
 BotManager::BotManager(TelegramClient* tg, SteamApi* steam, PopularityApi* popularity, const UptimeTracker& uptime, QObject* parent)
-    : QObject(parent), m_tg(tg), m_steam(steam), m_popularity(popularity), m_uptime(uptime)
+    : QObject(parent), m_tg(tg), m_steam(steam), m_popularity(popularity), m_uptime(uptime), m_cleanupTimer(this)
 {
     connect(m_tg, &TelegramClient::messageReceived, this, &BotManager::onNewMessage);
     connect(m_steam, &SteamApi::playersDataReady, this, &BotManager::onSteamDataReady);
     connect(m_popularity, &PopularityApi::popularityDataReady, this, &BotManager::onPopularityDataReady);
     connect(&m_scheduleTimer, &QTimer::timeout, this, &BotManager::scheduleTick);
+
+    m_cleanupTimer.setInterval(300000);
+        connect(&m_cleanupTimer, &QTimer::timeout, this, [this]() {
+            m_processedUpdateIds.clear();
+            m_lastRequestTime.clear();
+            qDebug() << "[BotManager] Cleared duplicate/rate-limit cache";
+        });
+    m_cleanupTimer.start();
 }
 
 void BotManager::start()
@@ -41,6 +49,35 @@ const UptimeTracker& BotManager::uptime() const
 void BotManager::onNewMessage(const TgMessage& msg)
 {
     QString cmd = msg.text.trimmed().toLower();
+
+    // We only apply this slow mode / rate limiting to the bot commands
+    bool isBotCommand = cmd.startsWith("/") &&
+            (cmd == "/playercount" || cmd.startsWith("/playercount@") ||
+             cmd == "/uptime" || cmd.startsWith("/uptime@") ||
+             cmd == "/start");
+
+    if (isBotCommand)
+    {
+        qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (m_lastRequestTime.contains(msg.chatId))
+        {
+            qint64 lastTime = m_lastRequestTime[msg.chatId];
+            if (now - lastTime < RATE_LIMIT_MS)
+            {
+                qDebug() << "[BotManager] RATE LIMITED. ChatID:" << msg.chatId
+                         << "Wait" << (RATE_LIMIT_MS - (now - lastTime)) << "ms";
+                return;
+            }
+        }
+        m_lastRequestTime[msg.chatId] = now;
+
+        qDebug() << "[BotManager] Command received. ChatID:" << msg.chatId << "Text:" << msg.text;
+    }
+    else
+    {
+        return;
+    }
+
 
     if (cmd == "/playercount" || cmd.startsWith("/playercount@"))
     {

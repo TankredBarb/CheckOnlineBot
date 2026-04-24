@@ -63,4 +63,11 @@ private:
 
     int m_requestCounter = 0;
     bool m_fetching = false;
+
+    // Slow mode / rate limit settings
+    QSet<qint64> m_processedUpdateIds;
+    QTimer m_cleanupTimer;
+
+    QHash<qint64, qint64> m_lastRequestTime;
+    static constexpr qint64 RATE_LIMIT_MS = 500;
 };
