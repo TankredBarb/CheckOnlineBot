@@ -154,12 +154,19 @@ qint64 BotManager::msecToNextScheduledTime()
 {
     QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
     QDateTime now = QDateTime::currentDateTimeUtc().toTimeZone(tz);
-    QDateTime target = now;
-    target.setTime(QTime(Config::SCHEDULE_HOUR, Config::SCHEDULE_MINUTES, 0));
 
+    // Build target datetime for today with configured HH:MM
+    QDateTime target = now;
+    target.setTime(Config::SCHEDULE_TIME);
+    qDebug() << target;
+
+    // If target time already passed today, schedule for tomorrow
     if (now >= target)
+    {
         target = target.addDays(1);
-    return now.msecsTo(target);
+    }
+
+        return now.msecsTo(target);
 }
 
 void BotManager::scheduleNextRun()

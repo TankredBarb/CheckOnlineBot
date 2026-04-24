@@ -1,6 +1,8 @@
 #pragma once
 #include <QString>
 #include <QList>
+#include <QTime>
+#include <QRegularExpression>
 
 namespace Config
 {
@@ -28,4 +30,27 @@ namespace Config
     inline const int SCHEDULE_HOUR = 21;
     inline const int SCHEDULE_MINUTES = 0;
     inline const int POLL_INTERVAL_MS = 2500;
+
+    // Schedule time in HH:MM format from env var, default "21:00"
+    inline const QString SCHEDULE_TIME_STR = qEnvironmentVariable("SCHEDULE_TIME", "21:00");
+
+        // Parse HH:MM into QTime for easy comparison
+    inline const QTime parseScheduleTime()
+    {
+        QRegularExpression re(R"(^(\d{1,2}):(\d{2})$)");
+        auto match = re.match(SCHEDULE_TIME_STR);
+        if (match.hasMatch())
+        {
+            int h = match.captured(1).toInt();
+            int m = match.captured(2).toInt();
+            if (h >= 0 && h < 24 && m >= 0 && m < 60)
+            {
+                return QTime(h, m);
+            }
+        }
+
+        return QTime(21, 0);
+    }
+
+    inline const QTime SCHEDULE_TIME = parseScheduleTime();
 }
