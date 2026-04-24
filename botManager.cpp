@@ -1,12 +1,11 @@
 #include "botManager.h"
 #include "config.h"
 #include <QDebug>
-#include <QDateTime>
-#include <QTimeZone>
 #include <QLocale>
+#include <QTimeZone>
 
-BotManager::BotManager(TelegramClient* tg, SteamApi* steam, PopularityApi* popularity, QObject* parent)
-    : QObject(parent), m_tg(tg), m_steam(steam), m_popularity(popularity)
+BotManager::BotManager(TelegramClient* tg, SteamApi* steam, PopularityApi* popularity, const UptimeTracker& uptime, QObject* parent)
+    : QObject(parent), m_tg(tg), m_steam(steam), m_popularity(popularity), m_uptime(uptime)
 {
     connect(m_tg, &TelegramClient::messageReceived, this, &BotManager::onNewMessage);
     connect(m_steam, &SteamApi::playersDataReady, this, &BotManager::onSteamDataReady);
@@ -34,13 +33,29 @@ void BotManager::start()
     scheduleNextRun();
 }
 
+const UptimeTracker& BotManager::uptime() const
+{
+    return m_uptime;
+}
+
 void BotManager::onNewMessage(const TgMessage& msg)
 {
     QString cmd = msg.text.trimmed().toLower();
 
     if (cmd == "/playercount" || cmd.startsWith("/playercount@"))
     {
-        RequestContext ctx{msg.chatId, msg.messageThreadId};
+        RequestContext ctx;
+        ctx.chatId = msg.chatId;
+        ctx.topicId = msg.messageThreadId;
+        ctx.type = RequestContext::RequestType::PlayerCount;
+        fetchAndBroadcast(ctx);
+    }
+    else if (cmd == "/uptime" || cmd.startsWith("/uptime@"))
+    {
+        RequestContext ctx;
+        ctx.chatId = msg.chatId;
+        ctx.topicId = msg.messageThreadId;
+        ctx.type = RequestContext::RequestType::Uptime;
         fetchAndBroadcast(ctx);
     }
     else if (cmd == "/start")
@@ -49,11 +64,12 @@ void BotManager::onNewMessage(const TgMessage& msg)
     }
 }
 
+
 void BotManager::fetchAndBroadcast(const RequestContext& context)
 {
     if (m_fetching)
     {
-        qDebug() << "[BotManager] Request in progress, ignoring.";
+        qDebug() << "[BotManager] Request in progress, ignoring new one.";
         return;
     }
 
@@ -61,7 +77,17 @@ void BotManager::fetchAndBroadcast(const RequestContext& context)
     m_requestCounter++;
     m_pendingRequests[m_requestCounter] = context;
 
-    // Clear caches for new request
+    qDebug() << "[BotManager] Created request ID:" << m_requestCounter << "Type:"
+             << (context.type == RequestContext::RequestType::PlayerCount ? "PlayerCount" : "Uptime");
+
+    // Handle Uptime requests immediately (no API calls needed)
+    if (context.type == RequestContext::RequestType::Uptime)
+    {
+        sendUptimeReport(m_requestCounter);
+        return;
+    }
+
+    // Handle PlayerCount requests (fetch data from APIs)
     m_steamCache.remove(m_requestCounter);
     m_popularityCache.remove(m_requestCounter);
     m_steamErrorCache.remove(m_requestCounter);
@@ -80,20 +106,73 @@ void BotManager::fetchAndBroadcast(const RequestContext& context)
     }
 }
 
-// --- SYNCHRONIZATION OF TWO APIS ---
+void BotManager::sendUptimeReport(int requestId)
+{
+    m_fetching = false;
+
+    if (!m_pendingRequests.contains(requestId))
+    {
+        qWarning() << "[BotManager] Uptime request" << requestId << "not found in pending requests";
+        return;
+    }
+
+    RequestContext ctx = m_pendingRequests.take(requestId);
+
+    if (ctx.chatId != 0)
+    {
+        QString uptimeStr = m_uptime.toString();
+        QDateTime start = m_uptime.startTime();
+        QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
+        QString localStart = start.toTimeZone(tz).toString("HH:mm • dd.MM.yyyy");
+
+        QString reply = QString(
+            "<b>⏱ ВРЕМЯ РАБОТЫ БОТА</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🕐 Работает: <b>%1</b>\n"
+            "📅 Запущен: <b>%2</b> (Киев)"
+        ).arg(uptimeStr).arg(localStart);
+
+        m_tg->sendMessage(ctx.chatId, reply, ctx.topicId);
+        qDebug() << "[BotManager] Uptime sent for request" << requestId;
+    }
+    else
+    {
+        qWarning() << "[BotManager] Invalid chatId for uptime request" << requestId;
+    }
+}
+
 void BotManager::onSteamDataReady(const QMap<int, int>& data, const QString& error, int requestId)
 {
-    m_steamCache[requestId] = data;
-    m_steamErrorCache[requestId] = error;
-    checkAndSend(requestId);
+    // Only process if it's a PlayerCount request
+    if (m_pendingRequests.contains(requestId) &&
+        m_pendingRequests[requestId].type == RequestContext::RequestType::PlayerCount)
+    {
+        m_steamCache[requestId] = data;
+        m_steamErrorCache[requestId] = error;
+        checkAndSend(requestId);
+    }
+    else
+    {
+        qDebug() << "[BotManager] Ignoring Steam data for non-PlayerCount request" << requestId;
+    }
 }
 
 void BotManager::onPopularityDataReady(int players, const QString& error, QString gameSlug, int requestId)
 {
-    m_popularityCache[requestId] = players;
-    m_popErrorCache[requestId] = error;
-    checkAndSend(requestId);
+    // Only process if it's a PlayerCount request
+    if (m_pendingRequests.contains(requestId) &&
+        m_pendingRequests[requestId].type == RequestContext::RequestType::PlayerCount)
+    {
+        m_popularityCache[requestId] = players;
+        m_popErrorCache[requestId] = error;
+        checkAndSend(requestId);
+    }
+    else
+    {
+        qDebug() << "[BotManager] Ignoring Popularity data for non-PlayerCount request" << requestId;
+    }
 }
+
 
 void BotManager::checkAndSend(int requestId)
 {
@@ -121,7 +200,6 @@ void BotManager::sendReport(int requestId)
     int popData = m_popularityCache.value(requestId, -1);
     m_popularityCache.remove(requestId);
 
-    // ИСПРАВЛЕНО: используем value() + remove() или просто take() без 2-го аргумента
     QString steamErr = m_steamErrorCache.value(requestId, "");
     m_steamErrorCache.remove(requestId);
 
@@ -135,7 +213,7 @@ void BotManager::sendReport(int requestId)
         qDebug() << "[BotManager] Report sent for request" << requestId;
     }
 }
-// --- SCHEDULING ---
+
 void BotManager::scheduleTick()
 {
     if (Config::TARGET_CHAT_ID != 0)
@@ -155,18 +233,16 @@ qint64 BotManager::msecToNextScheduledTime()
     QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
     QDateTime now = QDateTime::currentDateTimeUtc().toTimeZone(tz);
 
-    // Build target datetime for today with configured HH:MM
     QDateTime target = now;
     target.setTime(Config::SCHEDULE_TIME);
     qDebug() << target;
 
-    // If target time already passed today, schedule for tomorrow
     if (now >= target)
     {
         target = target.addDays(1);
     }
 
-        return now.msecsTo(target);
+    return now.msecsTo(target);
 }
 
 void BotManager::scheduleNextRun()
@@ -174,8 +250,6 @@ void BotManager::scheduleNextRun()
     m_scheduleTimer.start(msecToNextScheduledTime());
 }
 
-
-// --- FORMATTING WITH ERROR HANDLING ---
 QString BotManager::formatReport(const QMap<int, int>& steamData, const QString& steamError,
                                  int destinyAllPlatforms, const QString& popError)
 {

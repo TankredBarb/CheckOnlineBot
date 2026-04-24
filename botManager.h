@@ -1,24 +1,37 @@
 #pragma once
+
 #include <QObject>
 #include <QTimer>
 #include <QMap>
-#include <QString>
 #include "telegramClient.h"
 #include "steamApi.h"
 #include "popularityApi.h"
+#include "uptimeTracker.h"
 
 struct RequestContext
 {
     qint64 chatId = 0;
     qint64 topicId = 0;
+
+    enum class RequestType
+    {
+        PlayerCount,
+        Uptime
+    };
+
+    RequestType type = RequestType::PlayerCount;
 };
 
 class BotManager : public QObject
 {
     Q_OBJECT
 public:
-    explicit BotManager(TelegramClient* tg, SteamApi* steam, PopularityApi* popularity, QObject* parent = nullptr);
+    // Constructor now accepts uptime tracker by const reference
+    explicit BotManager(TelegramClient* tg, SteamApi* steam, PopularityApi* popularity, const UptimeTracker& uptime, QObject* parent = nullptr);
     void start();
+
+    // Public accessor for uptime (read-only)
+    const UptimeTracker& uptime() const;
 
 private slots:
     void onNewMessage(const TgMessage& msg);
@@ -33,11 +46,13 @@ private:
     void checkAndSend(int requestId);
     void sendReport(int requestId);
     QString formatReport(const QMap<int, int>& steamData, const QString& steamError,
-                         int destinyAllPlatforms, const QString& popError);
+                       int destinyAllPlatforms, const QString& popError);
+    void sendUptimeReport(int requestId);
 
     TelegramClient* m_tg;
     SteamApi* m_steam;
     PopularityApi* m_popularity;
+    const UptimeTracker& m_uptime;  // Reference, not owned
     QTimer m_scheduleTimer;
 
     QMap<int, RequestContext> m_pendingRequests;
