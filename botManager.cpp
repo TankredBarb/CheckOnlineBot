@@ -1,23 +1,24 @@
 #include "botManager.h"
 #include "config.h"
-#include <QDebug>
-#include <QLocale>
+#include <QDateTime>
 #include <QTimeZone>
+#include <QJsonArray>
 
 BotManager::BotManager(TelegramClient* tg, SteamApi* steam, PopularityApi* popularity, const UptimeTracker& uptime, QObject* parent)
     : QObject(parent), m_tg(tg), m_steam(steam), m_popularity(popularity), m_uptime(uptime), m_cleanupTimer(this)
 {
     connect(m_tg, &TelegramClient::messageReceived, this, &BotManager::onNewMessage);
+    connect(m_tg, &TelegramClient::callbackQueryReceived, this, &BotManager::handleCallbackQuery);
     connect(m_steam, &SteamApi::playersDataReady, this, &BotManager::onSteamDataReady);
     connect(m_popularity, &PopularityApi::popularityDataReady, this, &BotManager::onPopularityDataReady);
     connect(&m_scheduleTimer, &QTimer::timeout, this, &BotManager::scheduleTick);
 
     m_cleanupTimer.setInterval(300000);
-        connect(&m_cleanupTimer, &QTimer::timeout, this, [this]() {
-            m_processedUpdateIds.clear();
-            m_lastRequestTime.clear();
-            qDebug() << "[BotManager] Cleared duplicate/rate-limit cache";
-        });
+    connect(&m_cleanupTimer, &QTimer::timeout, this, [this] {
+        m_processedUpdateIds.clear();
+        m_lastRequestTime.clear();
+        qDebug() << "[BotManager] Cleared duplicate/rate-limit cache";
+    });
     m_cleanupTimer.start();
 }
 
@@ -46,15 +47,80 @@ const UptimeTracker& BotManager::uptime() const
     return m_uptime;
 }
 
+void BotManager::handleCallbackQuery(const QString& callbackQueryId, const QString& callbackData, qint64 chatId, qint64 topicId)
+{
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (m_lastRequestTime.contains(chatId))
+    {
+        qint64 lastTime = m_lastRequestTime[chatId];
+        if (now - lastTime < RATE_LIMIT_MS)
+        {
+            m_tg->answerCallbackQuery(callbackQueryId, "⏳ Подождите немного перед следующим запросом");
+            return;
+        }
+    }
+    m_lastRequestTime[chatId] = now;
+
+    QStringList parts = callbackData.split(':');
+    if (parts.size() != 2)
+    {
+        m_tg->answerCallbackQuery(callbackQueryId, "⚠️ Некорректный запрос");
+        return;
+    }
+
+    QString action = parts[0];
+    int requestId = parts[1].toInt();
+
+    if (!m_pendingRequests.contains(requestId))
+    {
+        // Silently acknowledge to remove loading spinner without alerting the user
+        m_tg->answerCallbackQuery(callbackQueryId);
+        return;
+    }
+
+    m_tg->answerCallbackQuery(callbackQueryId);
+
+    if (action == "uptime")
+    {
+        QString uptimeStr = m_uptime.toString();
+        QDateTime start = m_uptime.startTime();
+        QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
+        QString localStart = start.toTimeZone(tz).toString("HH:mm • dd.MM.yyyy");
+
+        QString reply = QString(
+            "⏱ <b>ВРЕМЯ РАБОТЫ БОТА</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🕐 Работает: <b>%1</b>\n"
+            "📅 Запущен: <b>%2</b> (Киев)"
+        ).arg(uptimeStr).arg(localStart);
+
+        m_tg->sendMessage(chatId, reply, topicId);
+    }
+    else if (action == "platforms")
+    {
+        QString reply = QString(
+            "🚧 <b>Распределение по платформам</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Эта функция находится в разработке.\n\n"
+            "Скоро вы сможете увидеть статистику игроков по:\n"
+            "• Steam\n• PlayStation\n• Xbox\n• Epic Games");
+
+        m_tg->sendMessage(chatId, reply, topicId);
+    }
+    else
+    {
+        m_tg->answerCallbackQuery(callbackQueryId, "❓ Неизвестная команда");
+    }
+}
+
 void BotManager::onNewMessage(const TgMessage& msg)
 {
     QString cmd = msg.text.trimmed().toLower();
 
-    // We only apply this slow mode / rate limiting to the bot commands
     bool isBotCommand = cmd.startsWith("/") &&
-            (cmd == "/playercount" || cmd.startsWith("/playercount@") ||
-             cmd == "/uptime" || cmd.startsWith("/uptime@") ||
-             cmd == "/start");
+        (cmd == "/playercount" || cmd.startsWith("/playercount@") ||
+         cmd == "/uptime" || cmd.startsWith("/uptime@") ||
+         cmd == "/start");
 
     if (isBotCommand)
     {
@@ -78,7 +144,6 @@ void BotManager::onNewMessage(const TgMessage& msg)
         return;
     }
 
-
     if (cmd == "/playercount" || cmd.startsWith("/playercount@"))
     {
         RequestContext ctx;
@@ -101,7 +166,6 @@ void BotManager::onNewMessage(const TgMessage& msg)
     }
 }
 
-
 void BotManager::fetchAndBroadcast(const RequestContext& context)
 {
     if (m_fetching)
@@ -117,14 +181,12 @@ void BotManager::fetchAndBroadcast(const RequestContext& context)
     qDebug() << "[BotManager] Created request ID:" << m_requestCounter << "Type:"
              << (context.type == RequestContext::RequestType::PlayerCount ? "PlayerCount" : "Uptime");
 
-    // Handle Uptime requests immediately (no API calls needed)
     if (context.type == RequestContext::RequestType::Uptime)
     {
         sendUptimeReport(m_requestCounter);
         return;
     }
 
-    // Handle PlayerCount requests (fetch data from APIs)
     m_steamCache.remove(m_requestCounter);
     m_popularityCache.remove(m_requestCounter);
     m_steamErrorCache.remove(m_requestCounter);
@@ -153,7 +215,7 @@ void BotManager::sendUptimeReport(int requestId)
         return;
     }
 
-    RequestContext ctx = m_pendingRequests.take(requestId);
+    RequestContext ctx = m_pendingRequests[requestId];
 
     if (ctx.chatId != 0)
     {
@@ -163,7 +225,7 @@ void BotManager::sendUptimeReport(int requestId)
         QString localStart = start.toTimeZone(tz).toString("HH:mm • dd.MM.yyyy");
 
         QString reply = QString(
-            "<b>⏱ ВРЕМЯ РАБОТЫ БОТА</b>\n"
+            "⏱ <b>ВРЕМЯ РАБОТЫ БОТА</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             "🕐 Работает: <b>%1</b>\n"
             "📅 Запущен: <b>%2</b> (Киев)"
@@ -171,6 +233,11 @@ void BotManager::sendUptimeReport(int requestId)
 
         m_tg->sendMessage(ctx.chatId, reply, ctx.topicId);
         qDebug() << "[BotManager] Uptime sent for request" << requestId;
+
+        QTimer::singleShot(300000, this, [this, requestId]() {
+            m_pendingRequests.remove(requestId);
+            qDebug() << "[BotManager] Cleaned up uptime request" << requestId;
+        });
     }
     else
     {
@@ -180,7 +247,6 @@ void BotManager::sendUptimeReport(int requestId)
 
 void BotManager::onSteamDataReady(const QMap<int, int>& data, const QString& error, int requestId)
 {
-    // Only process if it's a PlayerCount request
     if (m_pendingRequests.contains(requestId) &&
         m_pendingRequests[requestId].type == RequestContext::RequestType::PlayerCount)
     {
@@ -196,7 +262,6 @@ void BotManager::onSteamDataReady(const QMap<int, int>& data, const QString& err
 
 void BotManager::onPopularityDataReady(int players, const QString& error, QString gameSlug, int requestId)
 {
-    // Only process if it's a PlayerCount request
     if (m_pendingRequests.contains(requestId) &&
         m_pendingRequests[requestId].type == RequestContext::RequestType::PlayerCount)
     {
@@ -209,7 +274,6 @@ void BotManager::onPopularityDataReady(int players, const QString& error, QStrin
         qDebug() << "[BotManager] Ignoring Popularity data for non-PlayerCount request" << requestId;
     }
 }
-
 
 void BotManager::checkAndSend(int requestId)
 {
@@ -225,6 +289,33 @@ void BotManager::checkAndSend(int requestId)
     }
 }
 
+QJsonObject BotManager::buildInlineKeyboard(int requestId)
+{
+    QJsonArray keyboardRows;
+
+    {
+        QJsonArray row;
+        QJsonObject btn;
+        btn["text"] = "⏱ Показать аптайм";
+        btn["callback_data"] = QString("uptime:%1").arg(requestId);
+        row.append(btn);
+        keyboardRows.append(row);
+    }
+
+    {
+        QJsonArray row;
+        QJsonObject btn;
+        btn["text"] = "📊 Платформы (скоро)";
+        btn["callback_data"] = QString("platforms:%1").arg(requestId);
+        row.append(btn);
+        keyboardRows.append(row);
+    }
+
+    QJsonObject replyMarkup;
+    replyMarkup["inline_keyboard"] = keyboardRows;
+    return replyMarkup;
+}
+
 void BotManager::sendReport(int requestId)
 {
     m_fetching = false;
@@ -232,7 +323,7 @@ void BotManager::sendReport(int requestId)
     if (!m_pendingRequests.contains(requestId))
         return;
 
-    RequestContext ctx = m_pendingRequests.take(requestId);
+    RequestContext ctx = m_pendingRequests[requestId];
     auto steamData = m_steamCache.take(requestId);
     int popData = m_popularityCache.value(requestId, -1);
     m_popularityCache.remove(requestId);
@@ -246,8 +337,14 @@ void BotManager::sendReport(int requestId)
     if (ctx.chatId != 0)
     {
         QString report = formatReport(steamData, steamErr, popData, popErr);
-        m_tg->sendMessage(ctx.chatId, report, ctx.topicId);
+        QJsonObject replyMarkup = buildInlineKeyboard(requestId);
+        m_tg->sendMessage(ctx.chatId, report, ctx.topicId, replyMarkup);
         qDebug() << "[BotManager] Report sent for request" << requestId;
+
+        QTimer::singleShot(300000, this, [this, requestId]() {
+            m_pendingRequests.remove(requestId);
+            qDebug() << "[BotManager] Cleaned up request" << requestId;
+        });
     }
 }
 
@@ -302,32 +399,29 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
     QString d2Section;
     if (!steamError.isEmpty() && !popError.isEmpty())
     {
-        // Both sources failed
         d2Section = QString(
             "🎮 <b>Destiny 2</b> — <a href=\"%1\">Steam Store</a>\n"
             "🔴 <b>Данные временно недоступны</b>\n"
-            "   <i>Steam API: %2</i>\n"
-            "   <i>Global API: %3</i>\n"
-            "   <i>Попробуйте повторить запрос через несколько минут.</i>"
+            " <i>Steam API: %2</i>\n"
+            " <i>Global API: %3</i>\n"
+            " <i>Попробуйте повторить запрос через несколько минут.</i>"
         ).arg(d2Link).arg(steamError).arg(popError);
     }
     else if (!steamError.isEmpty())
     {
-        // Only Steam failed
         d2Section = QString(
             "🎮 <b>Destiny 2</b> — <a href=\"%1\">Steam Store</a>\n"
             "🔴 <b>Steam API недоступен:</b> %2\n"
-            "   <i>Пробуем показать глобальные данные, если они доступны.</i>"
+            " <i>Пробуем показать глобальные данные, если они доступны.</i>"
         ).arg(d2Link).arg(steamError);
 
         if (destinyAllPlatforms >= 0 && popError.isEmpty())
         {
-            d2Section += QString("\n🌍 <b>Все платформы: ~%1</b> игроков\n<i>⚠️ Примерные данные за 24ч</i>").arg(fmt(destinyAllPlatforms));
+            d2Section += QString("\n🌍 <b>Все платформы: ~%1</b> игроков\n <i>⚠️ Примерные данные за 24ч</i>").arg(fmt(destinyAllPlatforms));
         }
     }
     else if (!popError.isEmpty())
     {
-        // Only Global failed
         d2Section = QString(
             "🎮 <b>Destiny 2</b> — <a href=\"%1\">Steam Store</a>\n"
             "├─ 💻 Steam: <b>%2</b> игроков сейчас\n"
@@ -336,13 +430,12 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
     }
     else
     {
-        // All OK
         d2Section = QString(
             "🎮 <b>Destiny 2</b> — <a href=\"%1\">Steam Store</a>\n"
             "├─ 💻 Steam: <b>%2</b> игроков сейчас\n"
             "└─ 🌍 <b>Все платформы: ~%3</b> игроков\n"
-            "   <i>⚠️ Примерные данные за последние 24ч</i>\n"
-            "   <i>(включая PlayStation, Xbox, PC)</i>"
+            " <i>⚠️ Примерные данные за последние 24ч</i>\n"
+            " <i>(включая PlayStation, Xbox, PC)</i>"
         ).arg(d2Link).arg(fmt(steamData.value(Config::DESTINY_ID, -1))).arg(fmt(destinyAllPlatforms));
     }
 
@@ -368,26 +461,28 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
     if (!steamError.isEmpty() || !popError.isEmpty())
     {
         disclaimer = "━━━━━━━━━━━━━━━━━━━━\n"
-                     "<i>⚠️ Обнаружены проблемы с внешними API. Данные могут быть неполными.</i>\n"
-                     "<i>📊 Глобальная статистика из Popularity.report — примерная оценка за 24ч.</i>\n"
-                     "<i>Используйте с осторожностью, реальный онлайн может отличаться.</i>";
+            " <i>⚠️ Обнаружены проблемы с внешними API. Данные могут быть неполными.</i>\n"
+            " <i>📊 Глобальная статистика из Popularity.report — примерная оценка за 24ч.</i>\n"
+            " <i>Используйте с осторожностью, реальный онлайн может отличаться.</i>";
     }
     else
     {
         disclaimer = "━━━━━━━━━━━━━━━━━━━━\n"
-                     "<i>📊 Глобальная статистика из Popularity.report — примерная оценка за 24ч.</i>\n"
-                     "<i>⚠️ Используйте с осторожностью, реальный онлайн может отличаться.</i>";
+            " <i>📊 Глобальная статистика из Popularity.report — примерная оценка за 24ч.</i>\n"
+            " <i>⚠️ Используйте с осторожностью, реальный онлайн может отличаться.</i>";
     }
 
     const QString separator = "━━━━━━━━━━━━━━━━━━━━";
 
+    // [+] NEW: Добавляем ссылку на Bungie.net в начало — именно она станет превью
     return QString(
         "📊 <b>ОНЛАЙН В ИГРАХ</b>\n"
-        "%1\n"
-        "🕒 %2\n\n"
-        "%3\n\n"
+        "<a href=\"%1\">bungie.net</a>\n"  // [+] Эта ссылка задаст превью
+        "%2\n"
+        "🕒 %3\n\n"
         "%4\n\n"
-        "%5\n"
-        "%6"
-    ).arg(separator).arg(timeStr).arg(d2Section).arg(marSection).arg(separator).arg(disclaimer);
+        "%5\n\n"
+        "%6\n"
+        "%7"
+    ).arg(Config::BUNGIE_PREVIEW_URL).arg(separator).arg(timeStr).arg(d2Section).arg(marSection).arg(separator).arg(disclaimer);
 }

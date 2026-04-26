@@ -1,21 +1,20 @@
 #include "telegramClient.h"
-#include <QNetworkRequest>
-#include <QNetworkReply>
+#include <QUrl>
 #include <QJsonDocument>
-#include <QJsonObject>
 #include <QJsonArray>
-#include <QDebug>
+#include <QRegularExpression>
 #include <QTimer>
 
 TelegramClient::TelegramClient(const QString& token, QObject* parent)
-    : QObject(parent), m_token(token)
+    : QObject(parent)
+    , m_token(token)
 {
 }
 
 void TelegramClient::startPolling()
 {
     QTimer* timer = new QTimer(this);
-    connect(timer, &QTimer::timeout, [this]()
+    connect(timer, &QTimer::timeout, this, [this]
     {
         QMap<QString, QString> params;
         params["offset"] = QString::number(m_offset);
@@ -26,19 +25,37 @@ void TelegramClient::startPolling()
     qDebug() << "[TelegramClient] Polling started.";
 }
 
-void TelegramClient::sendMessage(qint64 chatId, const QString& text, qint64 messageThreadId)
+void TelegramClient::sendMessage(qint64 chatId, const QString& text, qint64 messageThreadId, const QJsonObject& replyMarkup)
 {
     QMap<QString, QString> params;
     params["chat_id"] = QString::number(chatId);
     params["text"] = text;
-    params["parse_mode"] = "HTML";  // Using HTML formatting
+    params["parse_mode"] = "HTML";
 
     if (messageThreadId > 0)
     {
         params["message_thread_id"] = QString::number(messageThreadId);
     }
 
+    if (!replyMarkup.isEmpty())
+    {
+        QJsonDocument doc(replyMarkup);
+        params["reply_markup"] = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
+    }
+
     sendRequest("sendMessage", params);
+}
+
+void TelegramClient::answerCallbackQuery(const QString& callbackQueryId, const QString& text)
+{
+    QMap<QString, QString> params;
+    params["callback_query_id"] = callbackQueryId;
+    if (!text.isEmpty())
+    {
+        params["text"] = text;
+        params["show_alert"] = "false";
+    }
+    sendRequest("answerCallbackQuery", params);
 }
 
 void TelegramClient::sendRequest(const QString& method, const QMap<QString, QString>& params)
@@ -114,7 +131,6 @@ void TelegramClient::processUpdate(const QJsonObject& update)
         QJsonObject message = update["message"].toObject();
         TgMessage msg;
 
-        // Explicit cast to QJsonObject before accessing field
         msg.chatId = message["chat"].toObject()["id"].toVariant().toLongLong();
         msg.messageThreadId = message.contains("message_thread_id") ? message["message_thread_id"].toInt() : 0;
 
@@ -123,5 +139,16 @@ void TelegramClient::processUpdate(const QJsonObject& update)
             msg.text = message["text"].toString();
             emit messageReceived(msg);
         }
+    }
+    else if (update.contains("callback_query"))
+    {
+        QJsonObject callback = update["callback_query"].toObject();
+        QString callbackQueryId = callback["id"].toString();
+        QString callbackData = callback["data"].toString();
+        QJsonObject message = callback["message"].toObject();
+        QJsonObject chat = message["chat"].toObject();
+        qint64 chatId = chat["id"].toVariant().toLongLong();
+        qint64 topicId = message.contains("message_thread_id") ? message["message_thread_id"].toInt() : 0;
+        emit callbackQueryReceived(callbackQueryId, callbackData, chatId, topicId);
     }
 }

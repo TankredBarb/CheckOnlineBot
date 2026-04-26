@@ -1,25 +1,30 @@
 #pragma once
 #include <QObject>
 #include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QJsonObject>
 #include <QMap>
 
 struct TgMessage
 {
     qint64 chatId;
-    qint64 messageThreadId;  // Для форум-топиков (может быть 0)
+    qint64 messageThreadId;
     QString text;
 };
 
 class TelegramClient : public QObject
 {
     Q_OBJECT
+
 public:
     explicit TelegramClient(const QString& token, QObject* parent = nullptr);
     void startPolling();
-    void sendMessage(qint64 chatId, const QString& text, qint64 messageThreadId = 0);
+    void sendMessage(qint64 chatId, const QString& text, qint64 messageThreadId = 0, const QJsonObject& replyMarkup = QJsonObject());
+    void answerCallbackQuery(const QString& callbackQueryId, const QString& text = QString());
 
 signals:
     void messageReceived(const TgMessage& msg);
+    void callbackQueryReceived(const QString& callbackQueryId, const QString& callbackData, qint64 chatId, qint64 topicId);
 
 private slots:
     void onPollReplyFinished();

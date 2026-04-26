@@ -53,4 +53,6 @@ namespace Config
     }
 
     inline const QTime SCHEDULE_TIME = parseScheduleTime();
+
+    static inline QString BUNGIE_PREVIEW_URL = "https://www.bungie.net/7";
 }
