@@ -13,7 +13,6 @@ BotManager::BotManager(TelegramClient* tg, SteamApi* steam, PopularityApi* popul
     connect(m_steam, &SteamApi::playersDataReady, this, &BotManager::onSteamDataReady);
     connect(m_popularity, &PopularityApi::popularityDataReady, this, &BotManager::onPopularityDataReady);
 
-    // [+] Connect platform distribution signal (with requestId)
     connect(m_popularity, &PopularityApi::platformDistributionReceived,
             this, &BotManager::onPlatformDistributionDataReady);
 
@@ -38,11 +37,14 @@ void BotManager::start()
 
     m_tg->startPolling();
     qDebug() << "[BotManager] Started.";
-    qDebug() << "[BotManager] Target Channel ID:" << Config::TARGET_CHAT_ID;
+
+    // [+] FIXED: Log both TARGET_CHAT_ID and TARGET_TOPIC_ID for user commands
+    qDebug() << "[BotManager] Target Chat ID:" << Config::TARGET_CHAT_ID
+             << "Topic ID:" << Config::TARGET_TOPIC_ID;
 
     if (Config::TARGET_CHAT_ID != 0)
     {
-        qDebug() << "[BotManager] Scheduled broadcasts ENABLED.";
+        qDebug() << "[BotManager] Scheduled broadcasts ENABLED (to General topic).";
     }
     scheduleNextRun();
 }
@@ -56,7 +58,6 @@ void BotManager::handleCallbackQuery(const QString& callbackQueryId, const QStri
 {
     qint64 now = QDateTime::currentMSecsSinceEpoch();
 
-    // Rate limit check
     if (m_lastRequestTime.contains(chatId))
     {
         qint64 lastTime = m_lastRequestTime[chatId];
@@ -76,30 +77,34 @@ void BotManager::handleCallbackQuery(const QString& callbackQueryId, const QStri
     }
 
     QString action = parts[0];
-    int requestId = parts[1].toInt();
+    // requestId from button is just for reference, we create new one for the action
+    // int refRequestId = parts[1].toInt();
 
-    // Acknowledge callback immediately to remove loading state
     m_tg->answerCallbackQuery(callbackQueryId);
 
     if (action == "uptime")
     {
-        QString uptimeStr = m_uptime.toString();
-        QDateTime start = m_uptime.startTime();
-        QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
-        QString localStart = start.toTimeZone(tz).toString("HH:mm • dd.MM.yyyy");
+        // [+] FIXED: Use the same requestId system as commands for consistency
+        m_requestCounter++;
+        RequestContext ctx;
+        ctx.chatId = chatId;
+        ctx.topicId = topicId;
+        ctx.type = RequestContext::RequestType::Uptime;
+        m_pendingRequests[m_requestCounter] = ctx;
 
-        QString reply = QString(
-            "⏱ <b>ВРЕМЯ РАБОТЫ БОТА</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "🕐 Работает: <b>%1</b>\n"
-            "📅 Запущен: <b>%2</b> (Киев)"
-        ).arg(uptimeStr).arg(localStart);
+        qDebug() << "[BotManager] Uptime request from button. ID:" << m_requestCounter
+                 << "Chat:" << chatId << "Topic:" << topicId;
 
-        m_tg->sendMessage(chatId, reply, topicId);
+        sendUptimeReport(m_requestCounter);
+
+        // Cleanup after 5 minutes
+        QTimer::singleShot(300000, this, [this, reqId = m_requestCounter]() {
+            m_pendingRequests.remove(reqId);
+            qDebug() << "[BotManager] Cleaned up uptime button request" << reqId;
+        });
     }
     else if (action == "platforms")
     {
-        // [+] Create new request for platform distribution from button click
         m_requestCounter++;
         RequestContext ctx;
         ctx.chatId = chatId;
@@ -110,10 +115,8 @@ void BotManager::handleCallbackQuery(const QString& callbackQueryId, const QStri
         qDebug() << "[BotManager] Platform request from button. ID:" << m_requestCounter
                  << "Chat:" << chatId << "Topic:" << topicId;
 
-        // Call API with new requestId
         m_popularity->requestPlatformDistribution(m_requestCounter);
 
-        // Cleanup after 5 minutes
         QTimer::singleShot(300000, this, [this, reqId = m_requestCounter]() {
             m_pendingRequests.remove(reqId);
             qDebug() << "[BotManager] Cleaned up platform button request" << reqId;
@@ -149,7 +152,6 @@ void BotManager::onNewMessage(const TgMessage& msg)
             }
         }
         m_lastRequestTime[msg.chatId] = now;
-
         qDebug() << "[BotManager] Command received. ChatID:" << msg.chatId << "Text:" << msg.text;
     }
     else
@@ -208,10 +210,8 @@ void BotManager::fetchAndBroadcast(const RequestContext& context)
     qDebug() << "[BotManager] Created request ID:" << m_requestCounter
              << "Type:" << static_cast<int>(context.type);
 
-    // [+] Handle PlatformDistribution
     if (context.type == RequestContext::RequestType::PlatformDistribution)
     {
-        // Pass requestId so we can track it through the async signal
         m_popularity->requestPlatformDistribution(m_requestCounter);
         return;
     }
@@ -222,7 +222,6 @@ void BotManager::fetchAndBroadcast(const RequestContext& context)
         return;
     }
 
-    // PlayerCount logic (original)
     m_steamCache.remove(m_requestCounter);
     m_popularityCache.remove(m_requestCounter);
     m_steamErrorCache.remove(m_requestCounter);
@@ -281,12 +280,10 @@ void BotManager::sendUptimeReport(int requestId)
     }
 }
 
-// [+] Slot with requestId parameter
 void BotManager::onPlatformDistributionDataReady(const QMap<PlatformCategory, int>& platformStats, int requestId)
 {
     m_fetching = false;
 
-    // Now we can reliably find the context because requestId was passed through
     if (!m_pendingRequests.contains(requestId))
     {
         qDebug() << "[BotManager] Platform request" << requestId << "not found (expired?)";
@@ -356,7 +353,7 @@ QJsonObject BotManager::buildInlineKeyboard(int requestId)
     {
         QJsonArray row;
         QJsonObject btn;
-        btn["text"] = "📊 Платформы";  // [+] Updated text
+        btn["text"] = "📊 Платформы";
         btn["callback_data"] = QString("platforms:%1").arg(requestId);
         row.append(btn);
         keyboardRows.append(row);
@@ -443,7 +440,6 @@ QString BotManager::formatPlatformReport(const QMap<PlatformCategory, int>& plat
             default: icon = "•"; break;
         }
 
-        // Format number with spaces (e.g. 1 000)
         QString formattedPlayers = QString::number(players).replace(QRegularExpression("(\\d)(?=(\\d{3})+(?!\\d))"), "\\1 ");
 
         report += QString("%1 <b>%2</b>: %3 (%4%)\n")
@@ -467,8 +463,6 @@ void BotManager::sendPlatformReport(int requestId, const QMap<PlatformCategory, 
     if (ctx.chatId != 0)
     {
         QString report = formatPlatformReport(platformStats);
-
-        // [+] NO BUTTONS for platform report (empty replyMarkup)
         m_tg->sendMessage(ctx.chatId, report, ctx.topicId);
 
         qDebug() << "[BotManager] Platform report sent for request" << requestId;
@@ -488,22 +482,29 @@ void BotManager::scheduleTick()
     {
         RequestContext ctx;
         ctx.chatId = Config::TARGET_CHAT_ID;
-        ctx.topicId = 0;
+        ctx.topicId = 0; // General topic
 
         qDebug() << "[BotManager] Scheduled broadcast triggered.";
         fetchAndBroadcast(ctx);
     }
-    scheduleNextRun();
+
+    // [+] FIX: Explicitly schedule for TOMORROW to avoid race condition around target time
+    QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
+    QDateTime now = QDateTime::currentDateTimeUtc().toTimeZone(tz);
+    QDateTime nextTarget = now;
+    nextTarget.setTime(Config::SCHEDULE_TIME);
+    nextTarget = nextTarget.addDays(1); // Force next day
+
+    m_scheduleTimer.start(now.msecsTo(nextTarget));
+    qDebug() << "[BotManager] Timer reset. Next run:" << nextTarget.toString(Qt::ISODate);
 }
 
 qint64 BotManager::msecToNextScheduledTime()
 {
     QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
     QDateTime now = QDateTime::currentDateTimeUtc().toTimeZone(tz);
-
     QDateTime target = now;
-    target.setTime(QTime(Config::SCHEDULE_HOUR, Config::SCHEDULE_MINUTES));
-    qDebug() << target;
+    target.setTime(Config::SCHEDULE_TIME);
 
     if (now >= target)
     {
@@ -603,16 +604,25 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
             " <i>⚠️ Используйте с осторожностью, реальный онлайн может отличаться.</i>";
     }
 
+    QString buttonNote = "\n\n<i>⏱ Кнопки под сообщением активны 5 минут</i>";
+
     const QString separator = "━━━━━━━━━━━━━━━━━━━━";
 
     return QString(
-        "📊 <b>ОНЛАЙН В ИГРАХ</b>\n"
-        "<a href=\"%1\">🔗 bungie.net</a>\n"
-        "%2\n"
-        "🕒 %3\n\n"
-        "%4\n\n"
-        "%5\n\n"
-        "%6\n"
-        "%7"
-    ).arg(Config::BUNGIE_PREVIEW_URL).arg(separator).arg(timeStr).arg(d2Section).arg(marSection).arg(separator).arg(disclaimer);
+                "📊 <b>ОНЛАЙН В ИГРАХ</b>\n"
+                "<a href=\"%1\">🔗 bungie.net</a>\n"
+                "%2\n"
+                "🕒 %3\n\n"
+                "%4\n\n"
+                "%5\n\n"
+                "%6\n"
+                "%7%8"
+                ).arg(Config::BUNGIE_PREVIEW_URL)
+                 .arg(separator)
+                 .arg(timeStr)
+                 .arg(d2Section)
+                 .arg(marSection)
+                 .arg(separator)
+                 .arg(disclaimer)
+                 .arg(buttonNote);
 }

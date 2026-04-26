@@ -92,7 +92,7 @@ void PopularityApi::onPopularityReplyFinished()
     emit popularityDataReady(players, error, m_currentSlug, m_currentRequestId);
 }
 
-void PopularityApi::requestPlatformDistribution(int requestId) // [+] Added requestId
+void PopularityApi::requestPlatformDistribution(int requestId)
 {
     qint64 now = QDateTime::currentMSecsSinceEpoch();
     QUrl url(QString("%1/platforms?before=%2").arg(Config::POPULARITY_API_BASE_URL).arg(now));
@@ -102,7 +102,7 @@ void PopularityApi::requestPlatformDistribution(int requestId) // [+] Added requ
     request.setTransferTimeout(8000);
 
     QNetworkReply* reply = m_net.get(request);
-    reply->setProperty("requestId", requestId); // [+] Save requestId in reply
+    reply->setProperty("requestId", requestId);
     connect(reply, &QNetworkReply::finished, this, &PopularityApi::onPlatformDistributionFinished);
 }
 
@@ -112,8 +112,9 @@ void PopularityApi::onPlatformDistributionFinished()
     if (!reply)
         return;
 
-    int requestId = reply->property("requestId").toInt(); // [+] Get requestId from reply
+    int requestId = reply->property("requestId").toInt();
 
+    // [+] Basic error logging only (verbose output removed)
     if (reply->error() != QNetworkReply::NoError)
     {
         qWarning() << "[PopularityApi] Platform distribution network error:" << reply->errorString();
@@ -160,27 +161,7 @@ void PopularityApi::onPlatformDistributionFinished()
         platformStats[cat] += players;
     }
 
-    int totalPlayers = 0;
-    for (int count : platformStats) totalPlayers += count;
-
-    qDebug() << "\n[Platform Distribution Summary]";
-    qDebug() << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
-    for (auto it = platformStats.begin(); it != platformStats.end(); ++it)
-    {
-        PlatformCategory cat = it.key();
-        int players = it.value();
-        double percent = totalPlayers > 0 ? (players * 100.0 / totalPlayers) : 0;
-
-        qDebug() << QString("%1 (ID:%2): %3 players (%4%)")
-                    .arg(platformCategoryToString(cat))
-                    .arg(static_cast<int>(cat))
-                    .arg(players)
-                    .arg(QString::number(percent, 'f', 2));
-    }
-    qDebug() << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
-    qDebug() << "Total:" << totalPlayers << "\n";
-
-    emit platformDistributionReceived(platformStats, requestId); // [+] Emit with requestId
+    emit platformDistributionReceived(platformStats, requestId);
 
     reply->deleteLater();
 }

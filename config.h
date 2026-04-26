@@ -28,30 +28,22 @@ namespace Config
 
     // --- Behavior ---
     inline const QString KYIV_TIMEZONE = "Europe/Kyiv";
-    inline const int SCHEDULE_HOUR = 21;
-    inline const int SCHEDULE_MINUTES = 0;
     inline const int POLL_INTERVAL_MS = 2500;
 
-    // Schedule time in HH:MM format from env var, default "21:00"
-    inline const QString SCHEDULE_TIME_STR = qEnvironmentVariable("SCHEDULE_TIME", "21:00");
 
-        // Parse HH:MM into QTime for easy comparison
-    inline const QTime parseScheduleTime()
+    // Parse HH:MM into QTime for easy comparison
+    static inline QTime parseScheduleTime()
     {
-        QRegularExpression re(R"(^(\d{1,2}):(\d{2})$)");
-        auto match = re.match(SCHEDULE_TIME_STR);
-        if (match.hasMatch())
+        QString timeStr = qEnvironmentVariable("SCHEDULE_TIME", "21:00");
+        QTime t = QTime::fromString(timeStr, "hh:mm");
+        if (!t.isValid())
         {
-            int h = match.captured(1).toInt();
-            int m = match.captured(2).toInt();
-            if (h >= 0 && h < 24 && m >= 0 && m < 60)
-            {
-                return QTime(h, m);
-            }
+            qWarning() << "[Config] Invalid SCHEDULE_TIME format ('" << timeStr << "'), using default 21:00";
+            return QTime(21, 0);
         }
-
-        return QTime(21, 0);
+        return t;
     }
+
 
     inline const QTime SCHEDULE_TIME = parseScheduleTime();
 

@@ -18,7 +18,7 @@ int main(int argc, char* argv[])
     qDebug() << "Qt Version:" << QT_VERSION_STR;
     qDebug() << "Destiny ID:" << Config::DESTINY_ID;
     qDebug() << "Marathon ID:" << Config::MARATHON_ID;
-    qDebug() << "Uptime started at:" << uptime.startTime().toString(Qt::ISODate);
+    qDebug() << "Uptime started at [UTC]:" << uptime.startTime().toString(Qt::ISODate);
     qDebug() << "========================================";
 
     if (Config::TG_TOKEN.isEmpty())
