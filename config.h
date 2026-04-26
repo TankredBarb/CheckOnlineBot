@@ -44,8 +44,7 @@ namespace Config
         return t;
     }
 
-
     inline const QTime SCHEDULE_TIME = parseScheduleTime();
-
     static inline QString BUNGIE_PREVIEW_URL = "https://www.bungie.net/7";
+    inline const bool USE_GUI = qEnvironmentVariable("USE_GUI", "0").toInt();
 }

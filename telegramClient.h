@@ -3,7 +3,9 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QJsonObject>
+#include <QHttpPart>
 #include <QMap>
+
 
 struct TgMessage
 {
@@ -21,6 +23,7 @@ public:
     void startPolling();
     void sendMessage(qint64 chatId, const QString& text, qint64 messageThreadId = 0, const QJsonObject& replyMarkup = QJsonObject());
     void answerCallbackQuery(const QString& callbackQueryId, const QString& text = QString());
+    void sendPhoto(qint64 chatId, const QByteArray& pngData, const QString& caption, qint64 topicId = 0);
 
 signals:
     void messageReceived(const TgMessage& msg);

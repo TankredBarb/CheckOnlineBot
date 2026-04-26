@@ -1,4 +1,5 @@
 #include "telegramClient.h"
+#include "config.h"
 #include <QUrl>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -151,4 +152,50 @@ void TelegramClient::processUpdate(const QJsonObject& update)
         qint64 topicId = message.contains("message_thread_id") ? message["message_thread_id"].toInt() : 0;
         emit callbackQueryReceived(callbackQueryId, callbackData, chatId, topicId);
     }
+}
+
+void TelegramClient::sendPhoto(qint64 chatId, const QByteArray& pngData, const QString& caption, qint64 topicId)
+{
+    QHttpMultiPart* multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+
+    QHttpPart chatIdPart;
+    chatIdPart.setHeader(QNetworkRequest::ContentDispositionHeader, QVariant("form-data; name=\"chat_id\""));
+    chatIdPart.setBody(QString::number(chatId).toUtf8());
+    multiPart->append(chatIdPart);
+
+    if (topicId != 0)
+    {
+        QHttpPart topicPart;
+        topicPart.setHeader(QNetworkRequest::ContentDispositionHeader, QVariant("form-data; name=\"message_thread_id\""));
+        topicPart.setBody(QString::number(topicId).toUtf8());
+        multiPart->append(topicPart);
+    }
+
+    QHttpPart captionPart;
+    captionPart.setHeader(QNetworkRequest::ContentDispositionHeader, QVariant("form-data; name=\"caption\""));
+    captionPart.setBody(caption.toUtf8());
+    multiPart->append(captionPart);
+
+    QHttpPart parseModePart;
+    parseModePart.setHeader(QNetworkRequest::ContentDispositionHeader, QVariant("form-data; name=\"parse_mode\""));
+    parseModePart.setBody("HTML");
+    multiPart->append(parseModePart);
+
+    QHttpPart photoPart;
+    photoPart.setHeader(QNetworkRequest::ContentDispositionHeader, QVariant("form-data; name=\"photo\"; filename=\"chart.png\""));
+    photoPart.setHeader(QNetworkRequest::ContentTypeHeader, QVariant("image/png"));
+    photoPart.setBody(pngData);
+    multiPart->append(photoPart);
+
+    QUrl url(QString("https://api.telegram.org/bot%1/sendPhoto").arg(Config::TG_TOKEN));
+    QNetworkRequest request(url);
+
+    QNetworkReply* reply = m_net.post(request, multiPart);
+    multiPart->setParent(reply);
+
+    connect(reply, &QNetworkReply::finished, [reply]() {
+        if (reply->error() != QNetworkReply::NoError)
+            qWarning() << "[TelegramClient] sendPhoto error:" << reply->errorString();
+        reply->deleteLater();
+    });
 }
