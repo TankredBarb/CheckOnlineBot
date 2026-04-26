@@ -3,6 +3,7 @@
 #include <QDateTime>
 #include <QTimeZone>
 #include <QJsonArray>
+#include <QRegularExpression>
 
 BotManager::BotManager(TelegramClient* tg, SteamApi* steam, PopularityApi* popularity, const UptimeTracker& uptime, QObject* parent)
     : QObject(parent), m_tg(tg), m_steam(steam), m_popularity(popularity), m_uptime(uptime), m_cleanupTimer(this)
@@ -11,6 +12,11 @@ BotManager::BotManager(TelegramClient* tg, SteamApi* steam, PopularityApi* popul
     connect(m_tg, &TelegramClient::callbackQueryReceived, this, &BotManager::handleCallbackQuery);
     connect(m_steam, &SteamApi::playersDataReady, this, &BotManager::onSteamDataReady);
     connect(m_popularity, &PopularityApi::popularityDataReady, this, &BotManager::onPopularityDataReady);
+
+    // [+] Connect platform distribution signal (with requestId)
+    connect(m_popularity, &PopularityApi::platformDistributionReceived,
+            this, &BotManager::onPlatformDistributionDataReady);
+
     connect(&m_scheduleTimer, &QTimer::timeout, this, &BotManager::scheduleTick);
 
     m_cleanupTimer.setInterval(300000);
@@ -32,8 +38,7 @@ void BotManager::start()
 
     m_tg->startPolling();
     qDebug() << "[BotManager] Started.";
-    qDebug() << "[BotManager] Target Channel ID:" << Config::TARGET_CHAT_ID
-             << "Target Topic ID:" << Config::TARGET_TOPIC_ID;
+    qDebug() << "[BotManager] Target Channel ID:" << Config::TARGET_CHAT_ID;
 
     if (Config::TARGET_CHAT_ID != 0)
     {
@@ -50,6 +55,8 @@ const UptimeTracker& BotManager::uptime() const
 void BotManager::handleCallbackQuery(const QString& callbackQueryId, const QString& callbackData, qint64 chatId, qint64 topicId)
 {
     qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    // Rate limit check
     if (m_lastRequestTime.contains(chatId))
     {
         qint64 lastTime = m_lastRequestTime[chatId];
@@ -64,20 +71,14 @@ void BotManager::handleCallbackQuery(const QString& callbackQueryId, const QStri
     QStringList parts = callbackData.split(':');
     if (parts.size() != 2)
     {
-        m_tg->answerCallbackQuery(callbackQueryId, "⚠️ Некорректный запрос");
+        m_tg->answerCallbackQuery(callbackQueryId);
         return;
     }
 
     QString action = parts[0];
     int requestId = parts[1].toInt();
 
-    if (!m_pendingRequests.contains(requestId))
-    {
-        // Silently acknowledge to remove loading spinner without alerting the user
-        m_tg->answerCallbackQuery(callbackQueryId);
-        return;
-    }
-
+    // Acknowledge callback immediately to remove loading state
     m_tg->answerCallbackQuery(callbackQueryId);
 
     if (action == "uptime")
@@ -98,18 +99,29 @@ void BotManager::handleCallbackQuery(const QString& callbackQueryId, const QStri
     }
     else if (action == "platforms")
     {
-        QString reply = QString(
-            "🚧 <b>Распределение по платформам</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "Эта функция находится в разработке.\n\n"
-            "Скоро вы сможете увидеть статистику игроков по:\n"
-            "• Steam\n• PlayStation\n• Xbox\n• Epic Games");
+        // [+] Create new request for platform distribution from button click
+        m_requestCounter++;
+        RequestContext ctx;
+        ctx.chatId = chatId;
+        ctx.topicId = topicId;
+        ctx.type = RequestContext::RequestType::PlatformDistribution;
+        m_pendingRequests[m_requestCounter] = ctx;
 
-        m_tg->sendMessage(chatId, reply, topicId);
+        qDebug() << "[BotManager] Platform request from button. ID:" << m_requestCounter
+                 << "Chat:" << chatId << "Topic:" << topicId;
+
+        // Call API with new requestId
+        m_popularity->requestPlatformDistribution(m_requestCounter);
+
+        // Cleanup after 5 minutes
+        QTimer::singleShot(300000, this, [this, reqId = m_requestCounter]() {
+            m_pendingRequests.remove(reqId);
+            qDebug() << "[BotManager] Cleaned up platform button request" << reqId;
+        });
     }
     else
     {
-        m_tg->answerCallbackQuery(callbackQueryId, "❓ Неизвестная команда");
+        // Silent acknowledge for unknown actions
     }
 }
 
@@ -120,7 +132,7 @@ void BotManager::onNewMessage(const TgMessage& msg)
     bool isBotCommand = cmd.startsWith("/") &&
         (cmd == "/playercount" || cmd.startsWith("/playercount@") ||
          cmd == "/uptime" || cmd.startsWith("/uptime@") ||
-         cmd == "/platforms" ||
+         cmd == "/platforms" || cmd.startsWith("/platforms@") ||
          cmd == "/start");
 
     if (isBotCommand)
@@ -161,17 +173,23 @@ void BotManager::onNewMessage(const TgMessage& msg)
         ctx.type = RequestContext::RequestType::Uptime;
         fetchAndBroadcast(ctx);
     }
-    else if (cmd == "/platforms")
+    else if (cmd == "/platforms" || cmd.startsWith("/platforms@"))
     {
-        qDebug() << "\n=== Testing Platform Distribution ===";
-        m_popularity->requestPlatformDistribution();
-
-        // Опционально: отправить сообщение в чат что данные в консоли
-        //m_tg->sendMessage(chatId, "📊 Данные по платформам выводятся в консоль", messageThreadId);
+        RequestContext ctx;
+        ctx.chatId = msg.chatId;
+        ctx.topicId = msg.messageThreadId;
+        ctx.type = RequestContext::RequestType::PlatformDistribution;
+        fetchAndBroadcast(ctx);
     }
     else if (cmd == "/start")
     {
-        m_tg->sendMessage(msg.chatId, "🤖 Бот готов. Используйте /playercount для проверки статистики.", msg.messageThreadId);
+        m_tg->sendMessage(msg.chatId,
+            "🤖 <b>Steam Destiny Stats Bot</b>\n\n"
+            "Команды:\n"
+            "/playercount — Полный отчет по онлайну\n"
+            "/platforms — Распределение игроков по платформам\n"
+            "/uptime — Время работы бота",
+            msg.messageThreadId);
     }
 }
 
@@ -187,8 +205,16 @@ void BotManager::fetchAndBroadcast(const RequestContext& context)
     m_requestCounter++;
     m_pendingRequests[m_requestCounter] = context;
 
-    qDebug() << "[BotManager] Created request ID:" << m_requestCounter << "Type:"
-             << (context.type == RequestContext::RequestType::PlayerCount ? "PlayerCount" : "Uptime");
+    qDebug() << "[BotManager] Created request ID:" << m_requestCounter
+             << "Type:" << static_cast<int>(context.type);
+
+    // [+] Handle PlatformDistribution
+    if (context.type == RequestContext::RequestType::PlatformDistribution)
+    {
+        // Pass requestId so we can track it through the async signal
+        m_popularity->requestPlatformDistribution(m_requestCounter);
+        return;
+    }
 
     if (context.type == RequestContext::RequestType::Uptime)
     {
@@ -196,6 +222,7 @@ void BotManager::fetchAndBroadcast(const RequestContext& context)
         return;
     }
 
+    // PlayerCount logic (original)
     m_steamCache.remove(m_requestCounter);
     m_popularityCache.remove(m_requestCounter);
     m_steamErrorCache.remove(m_requestCounter);
@@ -252,6 +279,21 @@ void BotManager::sendUptimeReport(int requestId)
     {
         qWarning() << "[BotManager] Invalid chatId for uptime request" << requestId;
     }
+}
+
+// [+] Slot with requestId parameter
+void BotManager::onPlatformDistributionDataReady(const QMap<PlatformCategory, int>& platformStats, int requestId)
+{
+    m_fetching = false;
+
+    // Now we can reliably find the context because requestId was passed through
+    if (!m_pendingRequests.contains(requestId))
+    {
+        qDebug() << "[BotManager] Platform request" << requestId << "not found (expired?)";
+        return;
+    }
+
+    sendPlatformReport(requestId, platformStats);
 }
 
 void BotManager::onSteamDataReady(const QMap<int, int>& data, const QString& error, int requestId)
@@ -314,7 +356,7 @@ QJsonObject BotManager::buildInlineKeyboard(int requestId)
     {
         QJsonArray row;
         QJsonObject btn;
-        btn["text"] = "📊 Платформы (скоро)";
+        btn["text"] = "📊 Платформы";  // [+] Updated text
         btn["callback_data"] = QString("platforms:%1").arg(requestId);
         row.append(btn);
         keyboardRows.append(row);
@@ -347,7 +389,9 @@ void BotManager::sendReport(int requestId)
     {
         QString report = formatReport(steamData, steamErr, popData, popErr);
         QJsonObject replyMarkup = buildInlineKeyboard(requestId);
+
         m_tg->sendMessage(ctx.chatId, report, ctx.topicId, replyMarkup);
+
         qDebug() << "[BotManager] Report sent for request" << requestId;
 
         QTimer::singleShot(300000, this, [this, requestId]() {
@@ -355,6 +399,87 @@ void BotManager::sendReport(int requestId)
             qDebug() << "[BotManager] Cleaned up request" << requestId;
         });
     }
+}
+
+QString BotManager::formatPlatformReport(const QMap<PlatformCategory, int>& platformStats)
+{
+    int totalPlayers = 0;
+    for (int count : platformStats) totalPlayers += count;
+
+    QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
+    QString timeStr = QDateTime::currentDateTimeUtc().toTimeZone(tz).toString("HH:mm • dd.MM.yyyy");
+
+    QString report = QString(
+        "📊 <b>РАСПРЕДЕЛЕНИЕ ПО ПЛАТФОРМАМ</b>\n"
+        "%1\n"
+        "🕒 %2\n\n"
+    ).arg("━━━━━━━━━━━━━━━━━━━━").arg(timeStr);
+
+    const QList<PlatformCategory> order = {
+        PlatformCategory::PlayStation,
+        PlatformCategory::Xbox,
+        PlatformCategory::Steam,
+        PlatformCategory::EpicGamesStore,
+        PlatformCategory::Stadia
+    };
+
+    for (PlatformCategory cat : order)
+    {
+        if (!platformStats.contains(cat)) continue;
+
+        int players = platformStats[cat];
+        if (players <= 0) continue;
+
+        double percent = totalPlayers > 0 ? (players * 100.0 / totalPlayers) : 0;
+        QString icon;
+
+        switch (cat)
+        {
+            case PlatformCategory::PlayStation: icon = "🎮"; break;
+            case PlatformCategory::Xbox: icon = "💚"; break;
+            case PlatformCategory::Steam: icon = "⚙️"; break;
+            case PlatformCategory::EpicGamesStore: icon = "🦅"; break;
+            case PlatformCategory::Stadia: icon = "☠️"; break;
+            default: icon = "•"; break;
+        }
+
+        // Format number with spaces (e.g. 1 000)
+        QString formattedPlayers = QString::number(players).replace(QRegularExpression("(\\d)(?=(\\d{3})+(?!\\d))"), "\\1 ");
+
+        report += QString("%1 <b>%2</b>: %3 (%4%)\n")
+                      .arg(icon)
+                      .arg(platformCategoryToString(cat))
+                      .arg(formattedPlayers)
+                      .arg(QString::number(percent, 'f', 1));
+    }
+
+    report += QString("\n%1\n<i>📊 Данные из Popularity.report</i>").arg("━━━━━━━━━━━━━━━━━━━━");
+    return report;
+}
+
+void BotManager::sendPlatformReport(int requestId, const QMap<PlatformCategory, int>& platformStats)
+{
+    if (!m_pendingRequests.contains(requestId))
+        return;
+
+    RequestContext ctx = m_pendingRequests[requestId];
+
+    if (ctx.chatId != 0)
+    {
+        QString report = formatPlatformReport(platformStats);
+
+        // [+] NO BUTTONS for platform report (empty replyMarkup)
+        m_tg->sendMessage(ctx.chatId, report, ctx.topicId);
+
+        qDebug() << "[BotManager] Platform report sent for request" << requestId;
+
+        QTimer::singleShot(300000, this, [this, requestId]() {
+            m_pendingRequests.remove(requestId);
+            qDebug() << "[BotManager] Cleaned up platform request" << requestId;
+        });
+    }
+
+    m_fetching = false;
 }
 
 void BotManager::scheduleTick()
@@ -377,7 +502,7 @@ qint64 BotManager::msecToNextScheduledTime()
     QDateTime now = QDateTime::currentDateTimeUtc().toTimeZone(tz);
 
     QDateTime target = now;
-    target.setTime(Config::SCHEDULE_TIME);
+    target.setTime(QTime(Config::SCHEDULE_HOUR, Config::SCHEDULE_MINUTES));
     qDebug() << target;
 
     if (now >= target)
@@ -404,7 +529,6 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
     QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
     QString timeStr = QDateTime::currentDateTimeUtc().toTimeZone(tz).toString("HH:mm • dd.MM.yyyy");
 
-    // --- Destiny 2 Section ---
     QString d2Section;
     if (!steamError.isEmpty() && !popError.isEmpty())
     {
@@ -442,13 +566,12 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
         d2Section = QString(
             "🎮 <b>Destiny 2</b> — <a href=\"%1\">Steam Store</a>\n"
             "├─ 💻 Steam: <b>%2</b> игроков сейчас\n"
-            "└─ 🌍 <b>Все платформы: ~%3</b> игроков\n"
+            "└─  <b>Все платформы: ~%3</b> игроков\n"
             " <i>⚠️ Примерные данные за последние 24ч</i>\n"
             " <i>(включая PlayStation, Xbox, PC)</i>"
         ).arg(d2Link).arg(fmt(steamData.value(Config::DESTINY_ID, -1))).arg(fmt(destinyAllPlatforms));
     }
 
-    // --- Marathon Section ---
     QString marSection;
     if (!steamError.isEmpty())
     {
@@ -465,7 +588,6 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
         ).arg(marLink).arg(fmt(steamData.value(Config::MARATHON_ID, -1)));
     }
 
-    // --- Footer / Disclaimer ---
     QString disclaimer;
     if (!steamError.isEmpty() || !popError.isEmpty())
     {
@@ -483,10 +605,9 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
 
     const QString separator = "━━━━━━━━━━━━━━━━━━━━";
 
-    // [+] NEW: Добавляем ссылку на Bungie.net в начало — именно она станет превью
     return QString(
         "📊 <b>ОНЛАЙН В ИГРАХ</b>\n"
-        "<a href=\"%1\">bungie.net</a>\n"  // [+] Эта ссылка задаст превью
+        "<a href=\"%1\">🔗 bungie.net</a>\n"
         "%2\n"
         "🕒 %3\n\n"
         "%4\n\n"

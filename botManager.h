@@ -5,6 +5,7 @@
 #include <QTimer>
 #include <QSet>
 #include <QHash>
+#include <QRegularExpression>
 #include "telegramClient.h"
 #include "steamApi.h"
 #include "popularityApi.h"
@@ -18,7 +19,8 @@ struct RequestContext
     enum class RequestType
     {
         PlayerCount,
-        Uptime
+        Uptime,
+        PlatformDistribution
     };
 
     RequestType type = RequestType::PlayerCount;
@@ -39,6 +41,7 @@ private slots:
     void handleCallbackQuery(const QString& callbackQueryId, const QString& callbackData, qint64 chatId, qint64 topicId);
     void onSteamDataReady(const QMap<int, int>& data, const QString& error, int requestId);
     void onPopularityDataReady(int players, const QString& error, QString gameSlug, int requestId);
+    void onPlatformDistributionDataReady(const QMap<PlatformCategory, int>& platformStats, int requestId); // [+] Added requestId
     void scheduleTick();
 
 private:
@@ -50,6 +53,8 @@ private:
     QString formatReport(const QMap<int, int>& steamData, const QString& steamError,
                          int destinyAllPlatforms, const QString& popError);
     void sendUptimeReport(int requestId);
+    void sendPlatformReport(int requestId, const QMap<PlatformCategory, int>& platformStats);
+    QString formatPlatformReport(const QMap<PlatformCategory, int>& platformStats);
     QJsonObject buildInlineKeyboard(int requestId);
 
     TelegramClient* m_tg;

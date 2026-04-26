@@ -92,7 +92,7 @@ void PopularityApi::onPopularityReplyFinished()
     emit popularityDataReady(players, error, m_currentSlug, m_currentRequestId);
 }
 
-void PopularityApi::requestPlatformDistribution()
+void PopularityApi::requestPlatformDistribution(int requestId) // [+] Added requestId
 {
     qint64 now = QDateTime::currentMSecsSinceEpoch();
     QUrl url(QString("%1/platforms?before=%2").arg(Config::POPULARITY_API_BASE_URL).arg(now));
@@ -102,6 +102,7 @@ void PopularityApi::requestPlatformDistribution()
     request.setTransferTimeout(8000);
 
     QNetworkReply* reply = m_net.get(request);
+    reply->setProperty("requestId", requestId); // [+] Save requestId in reply
     connect(reply, &QNetworkReply::finished, this, &PopularityApi::onPlatformDistributionFinished);
 }
 
@@ -111,7 +112,8 @@ void PopularityApi::onPlatformDistributionFinished()
     if (!reply)
         return;
 
-    // 1. Network error check
+    int requestId = reply->property("requestId").toInt(); // [+] Get requestId from reply
+
     if (reply->error() != QNetworkReply::NoError)
     {
         qWarning() << "[PopularityApi] Platform distribution network error:" << reply->errorString();
@@ -119,7 +121,6 @@ void PopularityApi::onPlatformDistributionFinished()
         return;
     }
 
-    // 2. HTTP status check
     int httpCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if (httpCode != 200)
     {
@@ -128,7 +129,6 @@ void PopularityApi::onPlatformDistributionFinished()
         return;
     }
 
-    // 3. JSON validation
     QByteArray data = reply->readAll();
     QJsonDocument doc = QJsonDocument::fromJson(data);
     if (doc.isNull() || !doc.isArray())
@@ -140,7 +140,6 @@ void PopularityApi::onPlatformDistributionFinished()
 
     QJsonArray array = doc.array();
 
-    // 4. Parse & map data
     QMap<PlatformCategory, int> platformStats;
     platformStats[PlatformCategory::Xbox] = 0;
     platformStats[PlatformCategory::PlayStation] = 0;
@@ -161,12 +160,11 @@ void PopularityApi::onPlatformDistributionFinished()
         platformStats[cat] += players;
     }
 
-    // 5. Console output for testing
     int totalPlayers = 0;
     for (int count : platformStats) totalPlayers += count;
 
     qDebug() << "\n[Platform Distribution Summary]";
-    qDebug() << "----------------------------------";
+    qDebug() << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
     for (auto it = platformStats.begin(); it != platformStats.end(); ++it)
     {
         PlatformCategory cat = it.key();
@@ -179,11 +177,10 @@ void PopularityApi::onPlatformDistributionFinished()
                     .arg(players)
                     .arg(QString::number(percent, 'f', 2));
     }
-    qDebug() << "----------------------------------";
+    qDebug() << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
     qDebug() << "Total:" << totalPlayers << "\n";
 
-    // 6. Emit to caller
-    emit platformDistributionReceived(platformStats);
+    emit platformDistributionReceived(platformStats, requestId); // [+] Emit with requestId
 
     reply->deleteLater();
 }

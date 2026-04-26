@@ -8,7 +8,6 @@
 #include <QString>
 #include "config.h"
 
-// [+] Strict platform category enumeration matching API IDs
 enum class PlatformCategory : int
 {
     Xbox = 1,
@@ -18,7 +17,6 @@ enum class PlatformCategory : int
     EpicGamesStore = 6
 };
 
-// [+] Helper for UI/logging conversion
 inline QString platformCategoryToString(PlatformCategory cat)
 {
     switch (cat)
@@ -39,15 +37,15 @@ class PopularityApi : public QObject
 public:
     explicit PopularityApi(QObject* parent = nullptr);
     void requestCrossPlatformPlayer(const QString& gameSlug, int requestId);
-    void requestPlatformDistribution();
+    void requestPlatformDistribution(int requestId); // [+] Added requestId parameter
 
 signals:
     void popularityDataReady(int players, const QString& error, QString gameSlug, int requestId);
-    void platformDistributionReceived(const QMap<PlatformCategory, int>& platformStats);
+    void platformDistributionReceived(const QMap<PlatformCategory, int>& platformStats, int requestId); // [+] Added requestId
 
 private slots:
     void onPopularityReplyFinished();
-    void onPlatformDistributionFinished(); // [+] Removed parameter for consistent Qt style
+    void onPlatformDistributionFinished();
 
 private:
     void setStandardHeaders(QNetworkRequest& request);
