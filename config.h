@@ -19,6 +19,7 @@ namespace Config
     // --- Popularity Report API (Destiny 2 ONLY) ---
     inline const QString POPULARITY_API_KEY = qEnvironmentVariable("POPULARITY_API_KEY", "");
     inline const QString POPULARITY_API_URL = "https://api.popularity.report/general";
+    static inline QString POPULARITY_API_BASE_URL = "https://api.popularity.report";
     inline const QString DESTINY_SLUG = "destiny-2";
 
     // --- Headers to mimic browser (required by Popularity API) ---

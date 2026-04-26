@@ -120,6 +120,7 @@ void BotManager::onNewMessage(const TgMessage& msg)
     bool isBotCommand = cmd.startsWith("/") &&
         (cmd == "/playercount" || cmd.startsWith("/playercount@") ||
          cmd == "/uptime" || cmd.startsWith("/uptime@") ||
+         cmd == "/platforms" ||
          cmd == "/start");
 
     if (isBotCommand)
@@ -159,6 +160,14 @@ void BotManager::onNewMessage(const TgMessage& msg)
         ctx.topicId = msg.messageThreadId;
         ctx.type = RequestContext::RequestType::Uptime;
         fetchAndBroadcast(ctx);
+    }
+    else if (cmd == "/platforms")
+    {
+        qDebug() << "\n=== Testing Platform Distribution ===";
+        m_popularity->requestPlatformDistribution();
+
+        // Опционально: отправить сообщение в чат что данные в консоли
+        //m_tg->sendMessage(chatId, "📊 Данные по платформам выводятся в консоль", messageThreadId);
     }
     else if (cmd == "/start")
     {
