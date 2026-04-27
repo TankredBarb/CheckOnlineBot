@@ -72,6 +72,7 @@ void BotManager::onNewMessage(const TgMessage& msg)
 
     bool isBotCommand = cmd.startsWith("/") &&
         (cmd == "/playercount" || cmd.startsWith("/playercount@") ||
+         cmd == "/short" || cmd.startsWith("/short@") ||
          cmd == "/uptime" || cmd.startsWith("/uptime@") ||
          cmd == "/platforms" || cmd.startsWith("/platforms@") ||
          cmd == "/start");
@@ -105,6 +106,14 @@ void BotManager::onNewMessage(const TgMessage& msg)
         ctx.type = RequestContext::RequestType::PlayerCount;
         fetchAndBroadcast(ctx);
     }
+    else if (cmd == "/short" || cmd.startsWith("/short@"))
+    {
+        RequestContext ctx;
+        ctx.chatId = msg.chatId;
+        ctx.topicId = msg.messageThreadId;
+        ctx.type = RequestContext::RequestType::ShortStats;
+        fetchAndBroadcast(ctx);
+    }
     else if (cmd == "/uptime" || cmd.startsWith("/uptime@"))
     {
         RequestContext ctx;
@@ -127,6 +136,7 @@ void BotManager::onNewMessage(const TgMessage& msg)
             "🤖 <b>Steam Destiny Stats Bot</b>\n\n"
             "Команды:\n"
             "/playercount — Полный отчет по онлайну\n"
+            "/short — Краткий отчет по онлайну\n"
             "/platforms — Распределение игроков по платформам\n"
             "/uptime — Время работы бота",
             msg.messageThreadId);
@@ -244,13 +254,17 @@ void BotManager::fetchAndBroadcast(const RequestContext& context)
     qDebug() << "[BotManager] Fetching data for request ID:" << m_requestCounter;
     m_steam->requestCurrentPlayers(Config::STEAM_APP_IDS, m_requestCounter);
 
-    if (!Config::POPULARITY_API_KEY.isEmpty())
+    // Для ShortStats не нужны данные Popularity API
+    if (context.type != RequestContext::RequestType::ShortStats)
     {
-        m_popularity->requestCrossPlatformPlayer(Config::DESTINY_SLUG, m_requestCounter);
-    }
-    else
-    {
-        onPopularityDataReady(-1, "", Config::DESTINY_SLUG, m_requestCounter);
+        if (!Config::POPULARITY_API_KEY.isEmpty())
+        {
+            m_popularity->requestCrossPlatformPlayer(Config::DESTINY_SLUG, m_requestCounter);
+        }
+        else
+        {
+            onPopularityDataReady(-1, "", Config::DESTINY_SLUG, m_requestCounter);
+        }
     }
 }
 
@@ -259,7 +273,20 @@ void BotManager::checkAndSend(int requestId)
     if (!m_pendingRequests.contains(requestId))
         return;
 
+    auto ctx = m_pendingRequests[requestId];
     bool steamReady = m_steamCache.contains(requestId);
+
+    // Для ShortStats нужны только Steam данные
+    if (ctx.type == RequestContext::RequestType::ShortStats)
+    {
+        if (steamReady)
+        {
+            sendShortReport(requestId);
+        }
+        return;
+    }
+
+    // Для PlayerCount нужны и Steam, и Popularity (если ключ задан)
     bool popReady = m_popularityCache.contains(requestId) || Config::POPULARITY_API_KEY.isEmpty();
 
     if (steamReady && popReady)
@@ -273,7 +300,8 @@ void BotManager::checkAndSend(int requestId)
 void BotManager::onSteamDataReady(const QMap<int, int>& data, const QString& error, int requestId)
 {
     if (m_pendingRequests.contains(requestId) &&
-        m_pendingRequests[requestId].type == RequestContext::RequestType::PlayerCount)
+        (m_pendingRequests[requestId].type == RequestContext::RequestType::PlayerCount ||
+         m_pendingRequests[requestId].type == RequestContext::RequestType::ShortStats))
     {
         m_steamCache[requestId] = data;
         m_steamErrorCache[requestId] = error;
@@ -281,7 +309,10 @@ void BotManager::onSteamDataReady(const QMap<int, int>& data, const QString& err
     }
     else
     {
-        qDebug() << "[BotManager] Ignoring Steam data for non-PlayerCount request" << requestId;
+        qDebug() << "[BotManager] Ignoring Steam data for request" << requestId
+                 << "(type:" << (m_pendingRequests.contains(requestId)
+                                 ? static_cast<int>(m_pendingRequests[requestId].type)
+                                 : -1) << ")";
     }
 }
 
@@ -391,6 +422,27 @@ void BotManager::sendReport(int requestId)
     }
 }
 
+// --- Short Stats ---
+void BotManager::sendShortReport(int requestId)
+{
+    m_fetching = false;
+
+    if (!m_pendingRequests.contains(requestId))
+        return;
+
+    RequestContext ctx = m_pendingRequests.take(requestId);
+    auto steamData = m_steamCache.take(requestId);
+    QString steamErr = m_steamErrorCache.take(requestId);
+
+    if (ctx.chatId != 0)
+    {
+        QString report = formatShortReport(steamData, steamErr, -1, QString());
+        m_tg->sendMessage(ctx.chatId, report, ctx.topicId);
+
+        qDebug() << "[BotManager] Short report sent for request" << requestId;
+    }
+}
+
 QString BotManager::formatReport(const QMap<int, int>& steamData, const QString& steamError,
                                  int destinyAllPlatforms, const QString& popError)
 {
@@ -497,6 +549,53 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
                  .arg(separator)
                  .arg(disclaimer)
                  .arg(buttonNote);
+}
+
+QString BotManager::formatShortReport(const QMap<int, int>& steamData, const QString& steamError,
+                                      int destinyAllPlatforms, const QString& popError)
+{
+    auto fmtOnline = [](int val) -> QString {
+        if (val < 0) return "N/A";
+        if (val >= 1000) {
+            return QString::number(val / 1000.0, 'f', 1) + "k";
+        }
+        return QString::number(val);
+    };
+
+    QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
+    QString timeStr = QDateTime::currentDateTimeUtc().toTimeZone(tz).toString("HH:mm • dd.MM.yyyy");
+
+    // D2
+    QString d2Online = "N/A";
+    if (steamError.isEmpty() && !popError.isEmpty())
+    {
+        // Только Steam
+        d2Online = fmtOnline(steamData.value(Config::DESTINY_ID, -1));
+    }
+    else if (!steamError.isEmpty() && popError.isEmpty())
+    {
+        // Только Popularity
+        d2Online = fmtOnline(destinyAllPlatforms);
+    }
+    else if (steamError.isEmpty() && popError.isEmpty())
+    {
+        // Оба доступны - показываем Steam как основной
+        d2Online = fmtOnline(steamData.value(Config::DESTINY_ID, -1));
+    }
+
+    // Marathon
+    QString marOnline = fmtOnline(steamData.value(Config::MARATHON_ID, -1));
+    if (!steamError.isEmpty())
+    {
+        marOnline = "N/A";
+    }
+
+    // Формируем короткое сообщение
+    QString report = QString("📊 <b>ОНЛАЙН</b> (%1)\n").arg(timeStr);
+    report += QString("<b>D2</b>: %1").arg(d2Online);
+    report += QString(" | <b>Marathon</b>: %1").arg(marOnline);
+
+    return report;
 }
 
 QJsonObject BotManager::buildInlineKeyboard(int requestId)

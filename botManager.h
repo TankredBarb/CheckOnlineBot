@@ -31,6 +31,7 @@ struct RequestContext
     enum class RequestType
     {
         PlayerCount,
+        ShortStats,
         Uptime,
         PlatformDistribution
     };
@@ -75,6 +76,11 @@ private:
     QString formatReport(const QMap<int, int>& steamData, const QString& steamError,
                          int destinyAllPlatforms, const QString& popError);
     QJsonObject buildInlineKeyboard(int requestId);
+
+    // --- Response Generators: Short Stats ---
+    void sendShortReport(int requestId);
+    QString formatShortReport(const QMap<int, int>& steamData, const QString& steamError,
+                              int destinyAllPlatforms, const QString& popError);
 
     // --- Response Generators: Uptime ---
     void sendUptimeReport(int requestId);
