@@ -962,7 +962,7 @@ QString BotManager::generateCompactPlatformReport(const QMap<PlatformCategory, i
         {PlatformCategory::PlayStation,     QString::fromUtf8("🟦")},
         {PlatformCategory::Xbox,            QString::fromUtf8("🟩")},
         {PlatformCategory::Steam,           QString::fromUtf8("🟥")},
-        {PlatformCategory::EpicGamesStore,  QString::fromUtf8("🟪")},
+        {PlatformCategory::EpicGamesStore,  QString::fromUtf8("⬜")},
         {PlatformCategory::Stadia,          QString::fromUtf8("🟨")}
     };
 
