@@ -5,18 +5,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-# ==================== BUILD OPTIONS ====================
 option(USE_GUI_CHARTS "Enable QImage/QPainter chart generation" OFF)
 
-# ==================== DEPENDENCIES ====================
+find_package(Qt6 REQUIRED COMPONENTS Core Network)
+
 if(USE_GUI_CHARTS)
-    find_package(Qt6 REQUIRED COMPONENTS Core Network Gui)
-    target_compile_definitions(CheckOnlineBot PRIVATE USE_GUI_CHARTS)
-else()
-    find_package(Qt6 REQUIRED COMPONENTS Core Network)
+    find_package(Qt6 REQUIRED COMPONENTS Gui)
 endif()
 
-# ==================== EXECUTABLE ====================
 add_executable(CheckOnlineBot
     main.cpp
     config.h
@@ -32,9 +28,9 @@ add_executable(CheckOnlineBot
     uptimeTracker.cpp
 )
 
-# ==================== LINKING ====================
+target_link_libraries(CheckOnlineBot PRIVATE Qt6::Core Qt6::Network)
+
 if(USE_GUI_CHARTS)
-    target_link_libraries(CheckOnlineBot PRIVATE Qt6::Core Qt6::Network Qt6::Gui)
-else()
-    target_link_libraries(CheckOnlineBot PRIVATE Qt6::Core Qt6::Network)
+    target_link_libraries(CheckOnlineBot PRIVATE Qt6::Gui)
+    target_compile_definitions(CheckOnlineBot PRIVATE USE_GUI_CHARTS)
 endif()
