@@ -165,3 +165,4 @@ void PopularityApi::onPlatformDistributionFinished()
 
     reply->deleteLater();
 }
+

@@ -54,3 +54,4 @@ private:
     int m_currentRequestId = 0;
     QString m_currentSlug;
 };
+
