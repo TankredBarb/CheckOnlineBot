@@ -30,16 +30,47 @@ void PopularityApi::setStandardHeaders(QNetworkRequest& request)
     request.setRawHeader("sec-gpc", "1");
 }
 
+QNetworkRequest PopularityApi::createRequest(const QUrl& url)
+{
+    QNetworkRequest request(url);
+    setStandardHeaders(request);
+    request.setTransferTimeout(REQUEST_TIMEOUT_MS);
+    return request;
+}
+
+bool PopularityApi::validateJsonResponse(QNetworkReply* reply, QJsonDocument& doc, QString& error)
+{
+    if (reply->error() != QNetworkReply::NoError)
+    {
+        error = QString("Network error: %1").arg(reply->errorString());
+        return false;
+    }
+
+    int httpCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (httpCode != 200)
+    {
+        error = QString("Popularity server returned status %1").arg(httpCode);
+        return false;
+    }
+
+    QByteArray data = reply->readAll();
+    doc = QJsonDocument::fromJson(data);
+    if (doc.isNull())
+    {
+        error = "Invalid JSON format from Popularity.report";
+        return false;
+    }
+
+    return true;
+}
+
 void PopularityApi::requestCrossPlatformPlayer(const QString& gameSlug, int requestId)
 {
     m_currentRequestId = requestId;
     m_currentSlug = gameSlug;
 
     QUrl url(Config::POPULARITY_API_URL);
-    QNetworkRequest request(url);
-
-    setStandardHeaders(request);
-    request.setTransferTimeout(8000);
+    QNetworkRequest request = createRequest(url);
 
     QNetworkReply* reply = m_net.get(request);
     connect(reply, &QNetworkReply::finished, this, &PopularityApi::onPopularityReplyFinished);
@@ -53,37 +84,24 @@ void PopularityApi::onPopularityReplyFinished()
 
     QString error;
     int players = -1;
+    QJsonDocument doc;
 
-    if (reply->error() != QNetworkReply::NoError)
+    if (validateJsonResponse(reply, doc, error))
     {
-        error = QString("Network error: %1").arg(reply->errorString());
-    }
-    else
-    {
-        int httpCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (httpCode != 200)
+        if (!doc.isArray() || doc.array().isEmpty())
         {
-            error = QString("Popularity server returned status %1").arg(httpCode);
+            error = "Invalid data format from Popularity.report";
         }
         else
         {
-            QByteArray data = reply->readAll();
-            QJsonDocument doc = QJsonDocument::fromJson(data);
-            if (doc.isNull() || !doc.isArray() || doc.array().isEmpty())
+            QJsonObject latest = doc.array().last().toObject();
+            if (latest.contains("players") && latest["players"].isDouble())
             {
-                error = "Invalid data format from Popularity.report";
+                players = static_cast<int>(latest["players"].toDouble());
             }
             else
             {
-                QJsonObject latest = doc.array().last().toObject();
-                if (latest.contains("players") && latest["players"].isDouble())
-                {
-                    players = static_cast<int>(latest["players"].toDouble());
-                }
-                else
-                {
-                    error = "Popularity API did not return players field";
-                }
+                error = "Popularity API did not return players field";
             }
         }
     }
@@ -97,9 +115,7 @@ void PopularityApi::requestPlatformDistribution(int requestId)
     qint64 now = QDateTime::currentMSecsSinceEpoch();
     QUrl url(QString("%1/platforms?before=%2").arg(Config::POPULARITY_API_BASE_URL).arg(now));
 
-    QNetworkRequest request(url);
-    setStandardHeaders(request);
-    request.setTransferTimeout(8000);
+    QNetworkRequest request = createRequest(url);
 
     QNetworkReply* reply = m_net.get(request);
     reply->setProperty("requestId", requestId);
@@ -114,7 +130,6 @@ void PopularityApi::onPlatformDistributionFinished()
 
     int requestId = reply->property("requestId").toInt();
 
-    // [+] Basic error logging only (verbose output removed)
     if (reply->error() != QNetworkReply::NoError)
     {
         qWarning() << "[PopularityApi] Platform distribution network error:" << reply->errorString();
@@ -154,7 +169,7 @@ void PopularityApi::onPlatformDistributionFinished()
         int categoryId = obj["category"].toInt();
         int players = obj["players"].toInt();
 
-        if (categoryId < 1 || categoryId > 6 || categoryId == 4)
+        if (!isValidPlatformCategory(categoryId))
             continue;
 
         PlatformCategory cat = static_cast<PlatformCategory>(categoryId);
@@ -165,4 +180,3 @@ void PopularityApi::onPlatformDistributionFinished()
 
     reply->deleteLater();
 }
-

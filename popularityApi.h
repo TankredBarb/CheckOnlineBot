@@ -30,6 +30,11 @@ inline QString platformCategoryToString(PlatformCategory cat)
     }
 }
 
+inline bool isValidPlatformCategory(int categoryId)
+{
+    return (categoryId >= 1 && categoryId <= 6 && categoryId != 4);
+}
+
 class PopularityApi : public QObject
 {
     Q_OBJECT
@@ -37,11 +42,11 @@ class PopularityApi : public QObject
 public:
     explicit PopularityApi(QObject* parent = nullptr);
     void requestCrossPlatformPlayer(const QString& gameSlug, int requestId);
-    void requestPlatformDistribution(int requestId); // [+] Added requestId parameter
+    void requestPlatformDistribution(int requestId);
 
 signals:
     void popularityDataReady(int players, const QString& error, QString gameSlug, int requestId);
-    void platformDistributionReceived(const QMap<PlatformCategory, int>& platformStats, int requestId); // [+] Added requestId
+    void platformDistributionReceived(const QMap<PlatformCategory, int>& platformStats, int requestId);
 
 private slots:
     void onPopularityReplyFinished();
@@ -49,9 +54,12 @@ private slots:
 
 private:
     void setStandardHeaders(QNetworkRequest& request);
+    QNetworkRequest createRequest(const QUrl& url);
+    bool validateJsonResponse(QNetworkReply* reply, QJsonDocument& doc, QString& error);
 
     QNetworkAccessManager m_net;
     int m_currentRequestId = 0;
     QString m_currentSlug;
-};
 
+    static constexpr int REQUEST_TIMEOUT_MS = 8000;
+};
