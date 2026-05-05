@@ -1008,16 +1008,31 @@ QString BotManager::generateCompactPlatformReport(const QMap<PlatformCategory, i
     double consolePercent = totalPlayers > 0 ? (consolePlayers * 100.0 / totalPlayers) : 0;
     double pcPercent = totalPlayers > 0 ? (pcPlayers * 100.0 / totalPlayers) : 0;
 
+    // Вычисляем блоки для консолей, а ПК получаем как остаток до 10
+    // Это гарантирует, что всегда будет ровно 10 блоков без потерь на округлении
     int consoleBlocks = qRound((consolePercent / 100.0) * SUMMARY_BLOCKS);
-    int pcBlocks = qRound((pcPercent / 100.0) * SUMMARY_BLOCKS);
+    int pcBlocks = SUMMARY_BLOCKS - consoleBlocks;
 
-    if (consoleBlocks == 0 && consolePercent > 0.5) consoleBlocks = 1;
-    if (pcBlocks == 0 && pcPercent > 0.5) pcBlocks = 1;
+    // Минимум 1 блок для каждой категории, если есть игроки
+    if (consoleBlocks == 0 && consolePercent > 0) {
+        consoleBlocks = 1;
+        pcBlocks = SUMMARY_BLOCKS - consoleBlocks;
+    }
+    if (pcBlocks == 0 && pcPercent > 0) {
+        pcBlocks = 1;
+        consoleBlocks = SUMMARY_BLOCKS - pcBlocks;
+    }
 
-    if (consoleBlocks + pcBlocks > SUMMARY_BLOCKS)
-    {
-        if (consoleBlocks > pcBlocks) pcBlocks = SUMMARY_BLOCKS - consoleBlocks;
-        else consoleBlocks = SUMMARY_BLOCKS - pcBlocks;
+    // Защита от выхода за границы (на случай если обе категории имеют игроков но одна доминирует)
+    if (consoleBlocks < 0) consoleBlocks = 0;
+    if (pcBlocks < 0) pcBlocks = 0;
+    if (consoleBlocks + pcBlocks > SUMMARY_BLOCKS) {
+        // Если сумма больше 10, уменьшаем большую категорию
+        if (consoleBlocks > pcBlocks) {
+            consoleBlocks = SUMMARY_BLOCKS - pcBlocks;
+        } else {
+            pcBlocks = SUMMARY_BLOCKS - consoleBlocks;
+        }
     }
 
     for (int i = 0; i < consoleBlocks; ++i) summaryBlocks.append(consoleBlock);
