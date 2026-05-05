@@ -454,6 +454,45 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
     QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
     QString timeStr = QDateTime::currentDateTimeUtc().toTimeZone(tz).toString("HH:mm • dd.MM.yyyy");
 
+    // Check for Destiny 2 weekly reset (Tuesday 17:00 UTC)
+    bool isRecentReset = false;
+    QDateTime now = QDateTime::currentDateTimeUtc();
+    QDate today = now.date();
+    QTime resetTime(17, 0, 0);
+
+    // Find the most recent Tuesday 17:00 UTC
+    QDateTime lastReset;
+    if (now.time() >= resetTime) {
+        // Today's reset already happened if today is Tuesday or later in the week
+        int daysSinceMonday = today.dayOfWeek() - 1; // Monday=0, Sunday=6
+        if (today.dayOfWeek() == 2) { // Today is Tuesday
+            lastReset = QDateTime(today, resetTime);
+        } else if (today.dayOfWeek() > 2) {
+            // Reset was on previous Tuesday
+            lastReset = QDateTime(today.addDays(-(daysSinceMonday - 1)), resetTime);
+        } else {
+            // Reset was last Tuesday
+            lastReset = QDateTime(today.addDays(-(daysSinceMonday + 6)), resetTime);
+        }
+    } else {
+        // Today's reset hasn't happened yet, so last reset was previous Tuesday
+        int daysSinceMonday = today.dayOfWeek() - 1;
+        if (today.dayOfWeek() == 2) { // Today is Tuesday, but before 17:00
+            lastReset = QDateTime(today.addDays(-7), resetTime);
+        } else if (today.dayOfWeek() > 2) {
+            lastReset = QDateTime(today.addDays(-(daysSinceMonday - 1)), resetTime);
+        } else {
+            lastReset = QDateTime(today.addDays(-(daysSinceMonday + 6)), resetTime);
+        }
+    }
+
+    qint64 hoursSinceReset = lastReset.secsTo(now) / 3600.0;
+    if (hoursSinceReset >= 0 && hoursSinceReset < 10) {
+        isRecentReset = true;
+    }
+
+    QString resetNoteHtml = isRecentReset ? " (недавно был рисет!) 🔴" : "";
+
     QString d2Section;
     if (!steamError.isEmpty() && !popError.isEmpty())
     {
@@ -481,20 +520,20 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
     else if (!popError.isEmpty())
     {
         d2Section = QString(
-            "🎮 <b>Destiny 2</b> — <a href=\"%1\">Steam Store</a>\n"
-            "├─ 💻 Steam: <b>%2</b> игроков сейчас\n"
-            "🔴 <b>Global API недоступен:</b> %3"
-        ).arg(d2Link).arg(fmt(steamData.value(Config::DESTINY_ID, -1))).arg(popError);
+            "🎮 <b>Destiny 2</b> — <a href=\"%1\">Steam Store</a>%2\n"
+            "├─ 💻 Steam: <b>%3</b> игроков сейчас\n"
+            "🔴 <b>Global API недоступен:</b> %4"
+        ).arg(d2Link).arg(resetNoteHtml).arg(fmt(steamData.value(Config::DESTINY_ID, -1))).arg(popError);
     }
     else
     {
         d2Section = QString(
-            "🎮 <b>Destiny 2</b> — <a href=\"%1\">Steam Store</a>\n"
-            "├─ 💻 Steam: <b>%2</b> игроков сейчас\n"
-            "└─  <b>Все платформы: ~%3</b> игроков\n"
+            "🎮 <b>Destiny 2</b> — <a href=\"%1\">Steam Store</a>%2\n"
+            "├─ 💻 Steam: <b>%3</b> игроков сейчас\n"
+            "└─  <b>Все платформы: ~%4</b> игроков\n"
             " <i>⚠️ Примерные данные за последние 24ч</i>\n"
             " <i>(включая PlayStation, Xbox, PC)</i>"
-        ).arg(d2Link).arg(fmt(steamData.value(Config::DESTINY_ID, -1))).arg(fmt(destinyAllPlatforms));
+        ).arg(d2Link).arg(resetNoteHtml).arg(fmt(steamData.value(Config::DESTINY_ID, -1))).arg(fmt(destinyAllPlatforms));
     }
 
     QString marSection;
@@ -528,7 +567,7 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
             " <i>⚠️ Используйте с осторожностью, реальный онлайн может отличаться.</i>";
     }
 
-    QString buttonNote = "\n\n<i>⏱ Кнопки под сообщением активны 5 минут</i>";
+    QString buttonNote = "<i>⏱ Кнопки под сообщением активны 5 минут</i>";
 
     const QString separator = "━━━━━━━━━━━━━━━━━━━━";
 
@@ -536,11 +575,11 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
                 "📊 <b>ОНЛАЙН В ИГРАХ</b>\n"
                 "<a href=\"%1\">🔗 bungie.net</a>\n"
                 "%2\n"
-                "🕒 %3\n\n"
+                "%3\n\n"
                 "%4\n\n"
                 "%5\n\n"
                 "%6\n"
-                "%7%8"
+                "%7\n%8"
                 ).arg(Config::BUNGIE_PREVIEW_URL)
                  .arg(separator)
                  .arg(timeStr)
