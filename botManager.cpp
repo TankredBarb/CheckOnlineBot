@@ -254,7 +254,7 @@ void BotManager::fetchAndBroadcast(const RequestContext& context)
     qDebug() << "[BotManager] Fetching data for request ID:" << m_requestCounter;
     m_steam->requestCurrentPlayers(Config::STEAM_APP_IDS, m_requestCounter);
 
-    // Для ShortStats не нужны данные Popularity API
+    // Skip Popularity API for ShortStats requests
     if (context.type != RequestContext::RequestType::ShortStats)
     {
         if (!Config::POPULARITY_API_KEY.isEmpty())
@@ -276,7 +276,7 @@ void BotManager::checkAndSend(int requestId)
     auto ctx = m_pendingRequests[requestId];
     bool steamReady = m_steamCache.contains(requestId);
 
-    // Для ShortStats нужны только Steam данные
+    // Only Steam data needed for ShortStats
     if (ctx.type == RequestContext::RequestType::ShortStats)
     {
         if (steamReady)
@@ -286,7 +286,7 @@ void BotManager::checkAndSend(int requestId)
         return;
     }
 
-    // Для PlayerCount нужны и Steam, и Popularity (если ключ задан)
+    // PlayerCount requires both Steam and Popularity (if key is set)
     bool popReady = m_popularityCache.contains(requestId) || Config::POPULARITY_API_KEY.isEmpty();
 
     if (steamReady && popReady)
@@ -569,17 +569,17 @@ QString BotManager::formatShortReport(const QMap<int, int>& steamData, const QSt
     QString d2Online = "N/A";
     if (steamError.isEmpty() && !popError.isEmpty())
     {
-        // Только Steam
+        // Steam only
         d2Online = fmtOnline(steamData.value(Config::DESTINY_ID, -1));
     }
     else if (!steamError.isEmpty() && popError.isEmpty())
     {
-        // Только Popularity
+        // Popularity only
         d2Online = fmtOnline(destinyAllPlatforms);
     }
     else if (steamError.isEmpty() && popError.isEmpty())
     {
-        // Оба доступны - показываем Steam как основной
+        // Both available - show Steam as primary
         d2Online = fmtOnline(steamData.value(Config::DESTINY_ID, -1));
     }
 
@@ -590,7 +590,7 @@ QString BotManager::formatShortReport(const QMap<int, int>& steamData, const QSt
         marOnline = "N/A";
     }
 
-    // Формируем короткое сообщение
+    // Build short message
     QString report = QString("📊 <b>ОНЛАЙН</b> (%1)\n").arg(timeStr);
     report += QString("<b>D2</b>: %1").arg(d2Online);
     report += QString(" | <b>Marathon</b>: %1").arg(marOnline);
@@ -690,9 +690,9 @@ void BotManager::sendPlatformReport(int requestId, const QMap<PlatformCategory, 
     for (int count : platformStats) totalPlayers += count;
 
 #ifdef USE_GUI_CHARTS
-    bool useGui = Config::USE_GUI; // Или проверяй переменную окружения
+    bool useGui = Config::USE_GUI; // Or check env variable
 #else
-    bool useGui = false; // Всегда текст если GUI не скомпилирован
+    bool useGui = false; // Always text if GUI not compiled
 #endif
 
     if (useGui)
@@ -887,7 +887,6 @@ QString BotManager::generateTextPlatformReport(const QMap<PlatformCategory, int>
         PlatformCategory::Stadia
     };
 
-    // Эмодзи для платформ
     const QMap<PlatformCategory, QString> platformEmoji = {
         {PlatformCategory::PlayStation, "🟦"},
         {PlatformCategory::Xbox,        "🟩"},
@@ -896,7 +895,7 @@ QString BotManager::generateTextPlatformReport(const QMap<PlatformCategory, int>
         {PlatformCategory::Stadia,      "🟥"}
     };
 
-    // Генерация списка платформ с прогресс-барами
+    // Generate platform list with progress bars
     for (PlatformCategory cat : order)
     {
         if (!platformStats.contains(cat) || platformStats[cat] <= 0) continue;
@@ -906,7 +905,7 @@ QString BotManager::generateTextPlatformReport(const QMap<PlatformCategory, int>
         QString name = platformCategoryToString(cat);
         QString emoji = platformEmoji.value(cat, "⬜");
 
-        // Прогресс-бар из 10 блоков
+        // 10-block progress bar
         int filledBlocks = static_cast<int>(percent / 10);
         QString bar;
         for (int i = 0; i < 10; ++i)
@@ -924,7 +923,7 @@ QString BotManager::generateTextPlatformReport(const QMap<PlatformCategory, int>
                       .arg(QString::number(percent, 'f', 1));
     }
 
-    // --- Сводка ПК vs Консоли (только проценты) ---
+    // --- PC vs Consoles summary (percentages only) ---
     int pcPlayers = platformStats.value(PlatformCategory::Steam, 0) + platformStats.value(PlatformCategory::EpicGamesStore, 0);
     int consolePlayers = platformStats.value(PlatformCategory::PlayStation, 0) + platformStats.value(PlatformCategory::Xbox, 0);
 
@@ -940,7 +939,7 @@ QString BotManager::generateTextPlatformReport(const QMap<PlatformCategory, int>
               + QString("📊 <b>%1%</b>\n\n")  // [+] Only percent
                   .arg(QString::number(consolePercent, 'f', 1));
 
-    // Дисклеймер
+    // Disclaimer
     report += QString("<i>📈 Данные из Popularity.report — оценка за последние 30 дней.</i>\n")
               + QString("<i>⚠️ Цифры примерные, не воспринимайте их сверхбуквально.</i>");
 
@@ -966,7 +965,7 @@ QString BotManager::generateCompactPlatformReport(const QMap<PlatformCategory, i
         {PlatformCategory::Stadia,          QString::fromUtf8("🟨")}
     };
 
-    // short bar (10 блоков)
+    // 10-block short bar
     const QString consoleBlock = QString::fromUtf8("🟦");
     const QString pcBlock = QString::fromUtf8("🟥");
     const QString emptyBlock = QString::fromUtf8("⬛");
@@ -1008,12 +1007,12 @@ QString BotManager::generateCompactPlatformReport(const QMap<PlatformCategory, i
     double consolePercent = totalPlayers > 0 ? (consolePlayers * 100.0 / totalPlayers) : 0;
     double pcPercent = totalPlayers > 0 ? (pcPlayers * 100.0 / totalPlayers) : 0;
 
-    // Вычисляем блоки для консолей, а ПК получаем как остаток до 10
-    // Это гарантирует, что всегда будет ровно 10 блоков без потерь на округлении
+    // Calculate console blocks, PC blocks are the remainder to 10
+    // This guarantees exactly 10 blocks without rounding losses
     int consoleBlocks = qRound((consolePercent / 100.0) * SUMMARY_BLOCKS);
     int pcBlocks = SUMMARY_BLOCKS - consoleBlocks;
 
-    // Минимум 1 блок для каждой категории, если есть игроки
+    // Minimum 1 block for each category if there are players
     if (consoleBlocks == 0 && consolePercent > 0) {
         consoleBlocks = 1;
         pcBlocks = SUMMARY_BLOCKS - consoleBlocks;
@@ -1023,11 +1022,11 @@ QString BotManager::generateCompactPlatformReport(const QMap<PlatformCategory, i
         consoleBlocks = SUMMARY_BLOCKS - pcBlocks;
     }
 
-    // Защита от выхода за границы (на случай если обе категории имеют игроков но одна доминирует)
+    // Boundary protection (in case both categories have players but one dominates)
     if (consoleBlocks < 0) consoleBlocks = 0;
     if (pcBlocks < 0) pcBlocks = 0;
     if (consoleBlocks + pcBlocks > SUMMARY_BLOCKS) {
-        // Если сумма больше 10, уменьшаем большую категорию
+        // If sum exceeds 10, reduce the larger category
         if (consoleBlocks > pcBlocks) {
             consoleBlocks = SUMMARY_BLOCKS - pcBlocks;
         } else {
