@@ -454,43 +454,7 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
     QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
     QString timeStr = QDateTime::currentDateTimeUtc().toTimeZone(tz).toString("HH:mm • dd.MM.yyyy");
 
-    // Check for Destiny 2 weekly reset (Tuesday 17:00 UTC)
-    bool isRecentReset = false;
-    QDateTime now = QDateTime::currentDateTimeUtc();
-    QDate today = now.date();
-    QTime resetTime(17, 0, 0);
-
-    // Find the most recent Tuesday 17:00 UTC
-    QDateTime lastReset;
-    if (now.time() >= resetTime) {
-        // Today's reset already happened if today is Tuesday or later in the week
-        int daysSinceMonday = today.dayOfWeek() - 1; // Monday=0, Sunday=6
-        if (today.dayOfWeek() == 2) { // Today is Tuesday
-            lastReset = QDateTime(today, resetTime);
-        } else if (today.dayOfWeek() > 2) {
-            // Reset was on previous Tuesday
-            lastReset = QDateTime(today.addDays(-(daysSinceMonday - 1)), resetTime);
-        } else {
-            // Reset was last Tuesday
-            lastReset = QDateTime(today.addDays(-(daysSinceMonday + 6)), resetTime);
-        }
-    } else {
-        // Today's reset hasn't happened yet, so last reset was previous Tuesday
-        int daysSinceMonday = today.dayOfWeek() - 1;
-        if (today.dayOfWeek() == 2) { // Today is Tuesday, but before 17:00
-            lastReset = QDateTime(today.addDays(-7), resetTime);
-        } else if (today.dayOfWeek() > 2) {
-            lastReset = QDateTime(today.addDays(-(daysSinceMonday - 1)), resetTime);
-        } else {
-            lastReset = QDateTime(today.addDays(-(daysSinceMonday + 6)), resetTime);
-        }
-    }
-
-    qint64 hoursSinceReset = lastReset.secsTo(now) / 3600.0;
-    if (hoursSinceReset >= 0 && hoursSinceReset < 10) {
-        isRecentReset = true;
-    }
-
+    bool isRecentReset = isDestiny2ResetRecent();
     QString resetNoteHtml = isRecentReset ? " (недавно был рисет!) 🔴" : "";
 
     QString d2Section;
@@ -1153,4 +1117,40 @@ qint64 BotManager::msecToNextScheduledTime()
 void BotManager::scheduleNextRun()
 {
     m_scheduleTimer.start(msecToNextScheduledTime());
+}
+
+bool BotManager::isDestiny2ResetRecent() const
+{
+    QDateTime now = QDateTime::currentDateTimeUtc();
+    QDate today = now.date();
+    QTime resetTime(17, 0, 0);
+
+    // Find the most recent Tuesday 17:00 UTC
+    QDateTime lastReset;
+    if (now.time() >= resetTime) {
+        // Today's reset already happened if today is Tuesday or later in the week
+        int daysSinceMonday = today.dayOfWeek() - 1; // Monday=0, Sunday=6
+        if (today.dayOfWeek() == 2) { // Today is Tuesday
+            lastReset = QDateTime(today, resetTime);
+        } else if (today.dayOfWeek() > 2) {
+            // Reset was on previous Tuesday
+            lastReset = QDateTime(today.addDays(-(daysSinceMonday - 1)), resetTime);
+        } else {
+            // Reset was last Tuesday
+            lastReset = QDateTime(today.addDays(-(daysSinceMonday + 6)), resetTime);
+        }
+    } else {
+        // Today's reset hasn't happened yet, so last reset was previous Tuesday
+        int daysSinceMonday = today.dayOfWeek() - 1;
+        if (today.dayOfWeek() == 2) { // Today is Tuesday, but before 17:00
+            lastReset = QDateTime(today.addDays(-7), resetTime);
+        } else if (today.dayOfWeek() > 2) {
+            lastReset = QDateTime(today.addDays(-(daysSinceMonday - 1)), resetTime);
+        } else {
+            lastReset = QDateTime(today.addDays(-(daysSinceMonday + 6)), resetTime);
+        }
+    }
+
+    qint64 hoursSinceReset = lastReset.secsTo(now) / 3600.0;
+    return (hoursSinceReset >= 0 && hoursSinceReset < 10);
 }

@@ -97,6 +97,9 @@ private:
     QString generateTextPlatformReport(const QMap<PlatformCategory, int>& platformStats, int totalPlayers);
     QString generateCompactPlatformReport(const QMap<PlatformCategory, int>& platformStats, int totalPlayers);
 
+    // --- Helper Methods ---
+    bool isDestiny2ResetRecent() const;
+
     // --- Scheduler Helpers ---
     void scheduleNextRun();
     qint64 msecToNextScheduledTime();
