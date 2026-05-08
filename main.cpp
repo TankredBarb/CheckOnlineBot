@@ -41,7 +41,21 @@ int main(int argc, char* argv[])
 
     if (Config::TG_TOKEN.isEmpty())
     {
-        qWarning() << "WARNING: TG_BOT_TOKEN not set. Bot will not start.";
+        qCritical() << "[FATAL] TG_BOT_TOKEN environment variable is NOT set.";
+        qCritical() << "The bot cannot function without a valid Telegram token.";
+        qCritical() << "Exiting...";
+        return 1;
+    }
+
+    if (Config::TARGET_CHAT_ID == 0)
+    {
+        qWarning() << "[Config] TG_CHANNEL_ID is not set. Scheduled reports will be DISABLED.";
+    }
+    else
+    {
+        qDebug() << "[Config] Scheduled reports enabled for Chat ID:" << Config::TARGET_CHAT_ID;
+        if (Config::TARGET_TOPIC_ID != 0)
+            qDebug() << "[Config] Targeted Topic ID:" << Config::TARGET_TOPIC_ID;
     }
 
     auto* tg = new TelegramClient(Config::TG_TOKEN, &app);
