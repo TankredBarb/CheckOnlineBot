@@ -84,7 +84,8 @@ void SteamApi::onSteamReplyFinished()
     int appId = reply->property("appId").toInt();
     auto* requestState = reply->property("statePtr").value<QObject*>();
     
-    if (!requestState) {
+    if (!requestState)
+    {
         reply->deleteLater();
         return;
     }
@@ -96,7 +97,8 @@ void SteamApi::onSteamReplyFinished()
     QString error;
     int players = parsePlayerCount(reply, error);
 
-    if (players >= 0) {
+    if (players >= 0)
+    {
         results[appId] = players;
         requestState->setProperty("results", QVariant::fromValue(results));
     }
@@ -106,7 +108,8 @@ void SteamApi::onSteamReplyFinished()
     pendingCount--;
     requestState->setProperty("pendingCount", pendingCount);
 
-    if (pendingCount <= 0) {
+    if (pendingCount <= 0)
+    {
         emit playersDataReady(results, error, requestId);
         requestState->deleteLater();
     }

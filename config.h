@@ -47,4 +47,5 @@ namespace Config
     inline const QTime SCHEDULE_TIME = parseScheduleTime();
     static inline QString BUNGIE_PREVIEW_URL = "https://www.bungie.net/7";
     inline const bool USE_GUI = qEnvironmentVariable("USE_GUI", "0").toInt();
+    inline const int HEALTH_PORT = qEnvironmentVariable("HEALTH_PORT", "0").toInt();
 }

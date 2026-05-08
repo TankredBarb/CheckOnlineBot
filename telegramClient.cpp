@@ -76,16 +76,22 @@ void TelegramClient::sendRequest(const QString& method, const QMap<QString, QStr
     QNetworkReply* reply = m_net.post(request, query.toString(QUrl::FullyEncoded).toUtf8());
     
     if (method == "getUpdates")
+    {
         connect(reply, &QNetworkReply::finished, this, &TelegramClient::onPollReplyFinished);
+    }
     else
+    {
         connect(reply, &QNetworkReply::finished, this, &TelegramClient::onSendReplyFinished);
+    }
 }
 
 void TelegramClient::onPollReplyFinished()
 {
     auto* reply = qobject_cast<QNetworkReply*>(sender());
     if (!reply)
+    {
         return;
+    }
 
     if (reply->error() == QNetworkReply::NoError)
     {
@@ -113,7 +119,9 @@ void TelegramClient::onSendReplyFinished()
 {
     auto* reply = qobject_cast<QNetworkReply*>(sender());
     if (!reply)
+    {
         return;
+    }
 
     if (reply->error() != QNetworkReply::NoError)
     {
@@ -133,7 +141,9 @@ void TelegramClient::onSendReplyFinished()
 void TelegramClient::processUpdate(const QJsonObject& update)
 {
     if (update.contains("update_id"))
+    {
         m_offset = update["update_id"].toInt() + 1;
+    }
 
     if (update.contains("message"))
     {

@@ -28,6 +28,8 @@ add_executable(CheckOnlineBot
     popularityApi.cpp
     uptimeTracker.h
     uptimeTracker.cpp
+    healthServer.h
+    healthServer.cpp
 )
 
 target_link_libraries(CheckOnlineBot PRIVATE Qt6::Core Qt6::Network)

@@ -4,6 +4,7 @@
 #include "popularityApi.h"
 #include "botManager.h"
 #include "uptimeTracker.h"
+#include "healthServer.h"
 
 // [+] Conditional application type
 #ifdef USE_GUI_CHARTS
@@ -63,6 +64,23 @@ int main(int argc, char* argv[])
     auto* popularity = new PopularityApi(&app);
     // Pass uptime by const reference to BotManager
     auto* bot = new BotManager(tg, steam, popularity, uptime, &app);
+
+    if (Config::HEALTH_PORT > 0)
+    {
+        auto* health = new HealthServer(&app);
+        if (health->listen(QHostAddress::Any, static_cast<quint16>(Config::HEALTH_PORT)))
+        {
+            qDebug() << "[Health] HTTP server started on port" << Config::HEALTH_PORT;
+        }
+        else
+        {
+            qWarning() << "[Health] FAILED to start server on port" << Config::HEALTH_PORT << ":" << health->errorString();
+        }
+    }
+    else
+    {
+        qDebug() << "[Health] Server disabled (HEALTH_PORT not set).";
+    }
 
     bot->start();
 

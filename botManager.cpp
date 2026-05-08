@@ -464,16 +464,22 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
     {
         d2Section = QString("🎮 <b>DESTINY 2</b>\n");
         
-        if (steamError.isEmpty()) {
+        if (steamError.isEmpty())
+        {
             d2Section += QString("├─ 💻 Steam Live: %1\n").arg(fmt(steamData.value(Config::DESTINY_ID, -1)));
-        } else {
+        }
+        else
+        {
             d2Section += "├─ 💻 Steam Live: <code>Error</code>\n";
         }
 
-        if (popError.isEmpty() && destinyAllPlatforms >= 0) {
+        if (popError.isEmpty() && destinyAllPlatforms >= 0)
+        {
             d2Section += QString("└─ 🌍 Global 24h: ~%1\n").arg(fmt(destinyAllPlatforms));
             d2Section += "   <i>(PS, Xbox, PC, Epic)</i>";
-        } else {
+        }
+        else
+        {
             d2Section += "└─ 🌍 Global 24h: <code>N/A</code>";
         }
         
@@ -481,12 +487,15 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
     }
 
     QString marSection;
-    if (steamError.isEmpty()) {
+    if (steamError.isEmpty())
+    {
         marSection = QString(
             "🌌 <b>MARATHON</b>\n"
             "└─ 💻 Steam Live: %1"
         ).arg(fmt(steamData.value(Config::MARATHON_ID, -1)));
-    } else {
+    }
+    else
+    {
         marSection = "🌌 <b>MARATHON</b>\n└─ 💻 Steam Live: <code>Error</code>";
     }
 
@@ -941,25 +950,29 @@ QString BotManager::generateCompactPlatformReport(const QMap<PlatformCategory, i
     QString spectrumBar;
     int blocksUsed = 0;
 
-    for (PlatformCategory cat : order) {
+    for (PlatformCategory cat : order)
+    {
         if (!platformStats.contains(cat) || platformStats[cat] <= 0) continue;
         double pct = (platformStats[cat] * 100.0) / totalPlayers;
         int blocks = qRound((pct / 100.0) * SPECTRUM_BLOCKS);
         if (blocks == 0 && pct > 1.0) blocks = 1; 
         
-        for (int i = 0; i < blocks && blocksUsed < SPECTRUM_BLOCKS; ++i) {
+        for (int i = 0; i < blocks && blocksUsed < SPECTRUM_BLOCKS; ++i)
+        {
             spectrumBar += platformIcons.value(cat);
             blocksUsed++;
         }
     }
-    while (blocksUsed < SPECTRUM_BLOCKS) {
+    while (blocksUsed < SPECTRUM_BLOCKS)
+    {
         spectrumBar += "⬛";
         blocksUsed++;
     }
 
     // 2. Build detailed list (Removed mini-bars for mobile fit)
     QString detailLines;
-    for (PlatformCategory cat : order) {
+    for (PlatformCategory cat : order)
+    {
         if (!platformStats.contains(cat) || platformStats[cat] <= 0) continue;
         double pct = (platformStats[cat] * 100.0) / totalPlayers;
         
@@ -1067,26 +1080,39 @@ bool BotManager::isDestiny2ResetRecent() const
 
     // Find the most recent Tuesday 17:00 UTC
     QDateTime lastReset;
-    if (now.time() >= resetTime) {
+    if (now.time() >= resetTime)
+    {
         // Today's reset already happened if today is Tuesday or later in the week
         int daysSinceMonday = today.dayOfWeek() - 1; // Monday=0, Sunday=6
-        if (today.dayOfWeek() == 2) { // Today is Tuesday
+        if (today.dayOfWeek() == 2) // Today is Tuesday
+        {
             lastReset = QDateTime(today, resetTime);
-        } else if (today.dayOfWeek() > 2) {
+        }
+        else if (today.dayOfWeek() > 2)
+        {
             // Reset was on previous Tuesday
             lastReset = QDateTime(today.addDays(-(daysSinceMonday - 1)), resetTime);
-        } else {
+        }
+        else
+        {
             // Reset was last Tuesday
             lastReset = QDateTime(today.addDays(-(daysSinceMonday + 6)), resetTime);
         }
-    } else {
+    }
+    else
+    {
         // Today's reset hasn't happened yet, so last reset was previous Tuesday
         int daysSinceMonday = today.dayOfWeek() - 1;
-        if (today.dayOfWeek() == 2) { // Today is Tuesday, but before 17:00
+        if (today.dayOfWeek() == 2) // Today is Tuesday, but before 17:00
+        {
             lastReset = QDateTime(today.addDays(-7), resetTime);
-        } else if (today.dayOfWeek() > 2) {
+        }
+        else if (today.dayOfWeek() > 2)
+        {
             lastReset = QDateTime(today.addDays(-(daysSinceMonday - 1)), resetTime);
-        } else {
+        }
+        else
+        {
             lastReset = QDateTime(today.addDays(-(daysSinceMonday + 6)), resetTime);
         }
     }
