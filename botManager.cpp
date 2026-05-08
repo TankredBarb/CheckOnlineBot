@@ -355,12 +355,16 @@ void BotManager::sendUptimeReport(int requestId)
         QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
         QString localStart = start.toTimeZone(tz).toString("HH:mm • dd.MM.yyyy");
 
+        const QString separator = "━━━━━━━━━━━━━━━━━━━━";
+
         QString reply = QString(
-            "⏱ <b>ВРЕМЯ РАБОТЫ БОТА</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "🕐 Работает: <b>%1</b>\n"
-            "📅 Запущен: <b>%2</b> (Киев)"
-        ).arg(uptimeStr).arg(localStart);
+            "⏱ <b>СТАТУС: UPTIME</b>\n"
+            "%1\n"
+            "🕐 Работает: <b>%2</b>\n"
+            "📅 Запуск: <code>%3</code>\n"
+            "%4\n"
+            "<i>Все данные по Киевскому времени (UTC+3)</i>"
+        ).arg(separator).arg(uptimeStr).arg(localStart).arg(separator);
 
         m_tg->sendMessage(ctx.chatId, reply, ctx.topicId);
         qDebug() << "[BotManager] Uptime sent for request" << requestId;
@@ -429,7 +433,14 @@ void BotManager::sendShortReport(int requestId)
 QString BotManager::formatReport(const QMap<int, int>& steamData, const QString& steamError,
                                  int destinyAllPlatforms, const QString& popError)
 {
-    auto fmt = [](int val) -> QString { return val >= 0 ? QString::number(val) : "N/A"; };
+    // Helper to format numbers with spaces and wrap in <code> for monospaced look
+    auto fmt = [](int val) -> QString {
+        if (val < 0) return "<code>N/A</code>";
+        QString s = QString::number(val);
+        for (int i = s.length() - 3; i > 0; i -= 3)
+            s.insert(i, " ");
+        return "<code>" + s + "</code>";
+    };
 
     const QString d2Link = "https://store.steampowered.com/app/1085660";
     const QString marLink = "https://store.steampowered.com/app/3065800";
@@ -438,150 +449,91 @@ QString BotManager::formatReport(const QMap<int, int>& steamData, const QString&
     QString timeStr = QDateTime::currentDateTimeUtc().toTimeZone(tz).toString("HH:mm • dd.MM.yyyy");
 
     bool isRecentReset = isDestiny2ResetRecent();
-    QString resetNoteHtml = isRecentReset ? " (недавно был рисет!) 🔴" : "";
+    QString resetNote = isRecentReset ? "\n🔴 <b>Внимание:</b> Недавно был рисет!" : "";
 
     QString d2Section;
     if (!steamError.isEmpty() && !popError.isEmpty())
     {
         d2Section = QString(
-            "🎮 <b>Destiny 2</b> — <a href=\"%1\">Steam Store</a>\n"
-            "🔴 <b>Данные временно недоступны</b>\n"
-            " <i>Steam API: %2</i>\n"
-            " <i>Global API: %3</i>\n"
-            " <i>Попробуйте повторить запрос через несколько минут.</i>"
-        ).arg(d2Link).arg(steamError).arg(popError);
-    }
-    else if (!steamError.isEmpty())
-    {
-        d2Section = QString(
-            "🎮 <b>Destiny 2</b> — <a href=\"%1\">Steam Store</a>\n"
-            "🔴 <b>Steam API недоступен:</b> %2\n"
-            " <i>Пробуем показать глобальные данные, если они доступны.</i>"
-        ).arg(d2Link).arg(steamError);
-
-        if (destinyAllPlatforms >= 0 && popError.isEmpty())
-        {
-            d2Section += QString("\n🌍 <b>Все платформы: ~%1</b> игроков\n <i>⚠️ Примерные данные за 24ч</i>").arg(fmt(destinyAllPlatforms));
-        }
-    }
-    else if (!popError.isEmpty())
-    {
-        d2Section = QString(
-            "🎮 <b>Destiny 2</b> — <a href=\"%1\">Steam Store</a>%2\n"
-            "├─ 💻 Steam: <b>%3</b> игроков сейчас\n"
-            "🔴 <b>Global API недоступен:</b> %4"
-        ).arg(d2Link).arg(resetNoteHtml).arg(fmt(steamData.value(Config::DESTINY_ID, -1))).arg(popError);
+            "🎮 <b>DESTINY 2</b>\n"
+            "🔴 <b>Данные недоступны</b>\n"
+            "<i>Ошибка API: %1</i>"
+        ).arg(steamError);
     }
     else
     {
-        d2Section = QString(
-            "🎮 <b>Destiny 2</b> — <a href=\"%1\">Steam Store</a>%2\n"
-            "├─ 💻 Steam: <b>%3</b> игроков сейчас\n"
-            "└─  <b>Все платформы: ~%4</b> игроков\n"
-            " <i>⚠️ Примерные данные за последние 24ч</i>\n"
-            " <i>(включая PlayStation, Xbox, PC)</i>"
-        ).arg(d2Link).arg(resetNoteHtml).arg(fmt(steamData.value(Config::DESTINY_ID, -1))).arg(fmt(destinyAllPlatforms));
+        d2Section = QString("🎮 <b>DESTINY 2</b>\n");
+        
+        if (steamError.isEmpty()) {
+            d2Section += QString("├─ 💻 Steam Live: %1\n").arg(fmt(steamData.value(Config::DESTINY_ID, -1)));
+        } else {
+            d2Section += "├─ 💻 Steam Live: <code>Error</code>\n";
+        }
+
+        if (popError.isEmpty() && destinyAllPlatforms >= 0) {
+            d2Section += QString("└─ 🌍 Global 24h: ~%1\n").arg(fmt(destinyAllPlatforms));
+            d2Section += "   <i>(PS, Xbox, PC, Epic)</i>";
+        } else {
+            d2Section += "└─ 🌍 Global 24h: <code>N/A</code>";
+        }
+        
+        d2Section += resetNote;
     }
 
     QString marSection;
-    if (!steamError.isEmpty())
-    {
+    if (steamError.isEmpty()) {
         marSection = QString(
-            "🌌 <b>Marathon</b> — <a href=\"%1\">Steam Store</a>\n"
-            "🔴 <b>Steam API недоступен:</b> %2"
-        ).arg(marLink).arg(steamError);
+            "🌌 <b>MARATHON</b>\n"
+            "└─ 💻 Steam Live: %1"
+        ).arg(fmt(steamData.value(Config::MARATHON_ID, -1)));
+    } else {
+        marSection = "🌌 <b>MARATHON</b>\n└─ 💻 Steam Live: <code>Error</code>";
     }
-    else
-    {
-        marSection = QString(
-            "🌌 <b>Marathon</b> — <a href=\"%1\">Steam Store</a>\n"
-            "└─ 💻 Steam: <b>%2</b> игроков сейчас"
-        ).arg(marLink).arg(fmt(steamData.value(Config::MARATHON_ID, -1)));
-    }
-
-    QString disclaimer;
-    if (!steamError.isEmpty() || !popError.isEmpty())
-    {
-        disclaimer = "━━━━━━━━━━━━━━━━━━━━\n"
-            " <i>⚠️ Обнаружены проблемы с внешними API. Данные могут быть неполными.</i>\n"
-            " <i>📊 Глобальная статистика из Popularity.report — примерная оценка за 24ч.</i>\n"
-            " <i>Используйте с осторожностью, реальный онлайн может отличаться.</i>";
-    }
-    else
-    {
-        disclaimer = "━━━━━━━━━━━━━━━━━━━━\n"
-            " <i>📊 Глобальная статистика из Popularity.report — примерная оценка за 24ч.</i>\n"
-            " <i>⚠️ Используйте с осторожностью, реальный онлайн может отличаться.</i>";
-    }
-
-    QString buttonNote = "<i>⏱ Кнопки под сообщением активны 5 минут</i>";
 
     const QString separator = "━━━━━━━━━━━━━━━━━━━━";
 
     return QString(
-                "📊 <b>ОНЛАЙН В ИГРАХ</b>\n"
-                "<a href=\"%1\">🔗 bungie.net</a>\n"
-                "%2\n"
-                "%3\n\n"
-                "%4\n\n"
-                "%5\n\n"
-                "%6\n"
-                "%7\n%8"
-                ).arg(Config::BUNGIE_PREVIEW_URL)
-                 .arg(separator)
-                 .arg(timeStr)
-                 .arg(d2Section)
-                 .arg(marSection)
-                 .arg(separator)
-                 .arg(disclaimer)
-                 .arg(buttonNote);
+        "📊 <b>СВОДКА: ОНЛАЙН BUNGIE</b>\n"
+        "<i>Прямой эфир и суточные оценки</i>\n"
+        "\n%1\n"
+        "🕒 %2\n"
+        "🌐 <a href=\"%3\">Просмотр на Bungie.net</a>\n"
+        "\n%4\n"
+        "\n%5\n"
+        "\n%6\n"
+        "📈 <i>Глобальные данные: Popularity.report (24ч).</i>\n"
+        "⚠️ <i>Цифры примерные, не воспринимайте их буквально.</i>\n"
+        "⏱ <i>Кнопки ниже активны 5 минут.</i>"
+    ).arg(separator)
+     .arg(timeStr)
+     .arg(Config::BUNGIE_PREVIEW_URL)
+     .arg(d2Section)
+     .arg(marSection)
+     .arg(separator);
 }
 
 QString BotManager::formatShortReport(const QMap<int, int>& steamData, const QString& steamError,
                                       int destinyAllPlatforms, const QString& popError)
 {
-    auto fmtOnline = [](int val) -> QString {
-        if (val < 0) return "N/A";
-        if (val >= 1000) {
-            return QString::number(val / 1000.0, 'f', 1) + "k";
-        }
-        return QString::number(val);
+    auto fmt = [](int val) -> QString {
+        if (val < 0) return "<code>N/A</code>";
+        QString s = QString::number(val);
+        for (int i = s.length() - 3; i > 0; i -= 3)
+            s.insert(i, " ");
+        return "<code>" + s + "</code>";
     };
 
     QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
-    QString timeStr = QDateTime::currentDateTimeUtc().toTimeZone(tz).toString("HH:mm • dd.MM.yyyy");
+    QString timeStr = QDateTime::currentDateTimeUtc().toTimeZone(tz).toString("HH:mm");
 
-    // D2
-    QString d2Online = "N/A";
-    if (steamError.isEmpty() && !popError.isEmpty())
-    {
-        // Steam only
-        d2Online = fmtOnline(steamData.value(Config::DESTINY_ID, -1));
-    }
-    else if (!steamError.isEmpty() && popError.isEmpty())
-    {
-        // Popularity only
-        d2Online = fmtOnline(destinyAllPlatforms);
-    }
-    else if (steamError.isEmpty() && popError.isEmpty())
-    {
-        // Both available - show Steam as primary
-        d2Online = fmtOnline(steamData.value(Config::DESTINY_ID, -1));
-    }
+    QString d2Online = steamError.isEmpty() ? fmt(steamData.value(Config::DESTINY_ID, -1)) : "<code>Error</code>";
+    QString marOnline = steamError.isEmpty() ? fmt(steamData.value(Config::MARATHON_ID, -1)) : "<code>Error</code>";
 
-    // Marathon
-    QString marOnline = fmtOnline(steamData.value(Config::MARATHON_ID, -1));
-    if (!steamError.isEmpty())
-    {
-        marOnline = "N/A";
-    }
-
-    // Build short message
-    QString report = QString("📊 <b>ОНЛАЙН</b> (%1)\n").arg(timeStr);
-    report += QString("<b>D2</b>: %1").arg(d2Online);
-    report += QString(" | <b>Marathon</b>: %1").arg(marOnline);
-
-    return report;
+    return QString("📊 <b>ОНЛАЙН</b> [<code>%1</code>]\n"
+                   "<b>D2</b>: %2 | <b>MAR</b>: %3")
+            .arg(timeStr)
+            .arg(d2Online)
+            .arg(marOnline);
 }
 
 QJsonObject BotManager::buildInlineKeyboard(int requestId)
@@ -727,44 +679,47 @@ QImage BotManager::generatePlatformChart(const QMap<PlatformCategory, int>& plat
     const int height = 950;
     QImage image(width, height, QImage::Format_RGB32);
 
-    QColor bgColor(30, 32, 36);
-    image.fill(bgColor);
-
+    // --- 1. Background: Deep Tech Gradient ---
+    QRadialGradient bgGradient(width / 2, height / 2, width);
+    bgGradient.setColorAt(0, QColor(45, 48, 56));
+    bgGradient.setColorAt(1, QColor(20, 22, 25));
+    
     QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.setRenderHint(QPainter::TextAntialiasing, true);
+    painter.fillRect(image.rect(), bgGradient);
 
-    // --- 1. Header ---
-    QFont titleFont("Segoe UI", 24, QFont::Bold);
+    // --- 2. Header: Bungie Style ---
+    painter.setPen(QPen(QColor(255, 255, 255, 40), 1));
+    painter.drawLine(100, 100, width - 100, 100);
+    
+    QFont titleFont("Segoe UI", 28, QFont::Light);
     painter.setFont(titleFont);
     painter.setPen(Qt::white);
-    painter.drawText(0, 60, width, 50, Qt::AlignCenter, "📊 РАСПРЕДЕЛЕНИЕ ПО ПЛАТФОРМАМ");
+    painter.drawText(0, 40, width, 60, Qt::AlignCenter, "РАСПРЕДЕЛЕНИЕ ИГРОКОВ");
 
-    // --- 2. Colors ---
-    const QMap<PlatformCategory, QColor> platformColors = {
+    // --- 3. Modern Color Palette ---
+    const QMap<PlatformCategory, QColor> baseColors = {
         {PlatformCategory::PlayStation, QColor(0, 112, 243)},
         {PlatformCategory::Xbox,        QColor(16, 124, 16)},
-        {PlatformCategory::Steam,       QColor(102, 192, 244)},
-        {PlatformCategory::EpicGamesStore, QColor(255, 255, 255)},
-        {PlatformCategory::Stadia,      QColor(233, 70, 70)}
+        {PlatformCategory::Steam,       QColor(255, 140, 0)}, 
+        {PlatformCategory::EpicGamesStore, QColor(220, 220, 220)}
     };
 
     const QList<PlatformCategory> order = {
         PlatformCategory::PlayStation,
         PlatformCategory::Xbox,
         PlatformCategory::Steam,
-        PlatformCategory::EpicGamesStore,
-        PlatformCategory::Stadia
+        PlatformCategory::EpicGamesStore
     };
 
-    // --- 3. Chart (Donut) ---
-    int pieSize = 340;
-    int pieX = (width - pieSize) / 2;
-    int pieY = 140;
+    // --- 4. Donut Chart: Modular Segments ---
+    int pieSize = 400;
     int centerX = width / 2;
-    int centerY = pieY + (pieSize / 2);
+    int centerY = 320;
     int radius = pieSize / 2;
-    int ringWidth = 50;
+    int ringWidth = 60;
+    const double GAP = 2.0; // Gaps between segments
 
     double currentAngle = -90;
 
@@ -772,82 +727,102 @@ QImage BotManager::generatePlatformChart(const QMap<PlatformCategory, int>& plat
     {
         if (!platformStats.contains(cat) || platformStats[cat] <= 0) continue;
 
-        int players = platformStats[cat];
-        double percent = totalPlayers > 0 ? (players * 100.0 / totalPlayers) : 0;
-        double spanAngle = percent * 3.6;
+        double percent = totalPlayers > 0 ? (platformStats[cat] * 100.0 / totalPlayers) : 0;
+        if (percent < 0.5) continue;
+
+        double spanAngle = (percent * 3.6) - (GAP);
 
         QPainterPath path;
         QRectF outerRect(centerX - radius, centerY - radius, radius * 2, radius * 2);
-        path.arcMoveTo(outerRect, currentAngle);
-        path.arcTo(outerRect, currentAngle, spanAngle);
+        path.arcMoveTo(outerRect, currentAngle + (GAP / 2.0));
+        path.arcTo(outerRect, currentAngle + (GAP / 2.0), spanAngle);
 
         QRectF innerRect(centerX - (radius - ringWidth), centerY - (radius - ringWidth), (radius - ringWidth) * 2, (radius - ringWidth) * 2);
-        path.arcTo(innerRect, currentAngle + spanAngle, -spanAngle);
+        path.arcTo(innerRect, currentAngle + (GAP / 2.0) + spanAngle, -spanAngle);
         path.closeSubpath();
 
-        painter.setBrush(platformColors[cat]);
+        // Gradient for depth
+        QConicalGradient segmentGradient(centerX, centerY, currentAngle + (spanAngle / 2.0));
+        QColor base = baseColors[cat];
+        segmentGradient.setColorAt(0, base.lighter(120));
+        segmentGradient.setColorAt(1, base.darker(120));
+
+        painter.setBrush(segmentGradient);
         painter.setPen(Qt::NoPen);
         painter.drawPath(path);
 
-        currentAngle += spanAngle;
+        currentAngle += spanAngle + GAP;
     }
 
-    // --- 4. Legend ---
-    QFont legendFont("Segoe UI", 16);
-    painter.setFont(legendFont);
+    // --- 5. Legend: Clean Cards ---
+    int currentY = 560;
+    int cardWidth = 600;
+    int cardX = (width - cardWidth) / 2;
 
-    int legendStartY = pieY + pieSize + 40;
-    int itemHeight = 45;
-
-    int currentY = legendStartY;
     for (PlatformCategory cat : order)
     {
         if (!platformStats.contains(cat) || platformStats[cat] <= 0) continue;
 
         int players = platformStats[cat];
         double percent = totalPlayers > 0 ? (players * 100.0 / totalPlayers) : 0;
-        QString name = platformCategoryToString(cat);
+        QString name = platformCategoryToString(cat).toUpper();
 
-        painter.setBrush(platformColors[cat]);
-        painter.setPen(Qt::NoPen);
-        int boxX = 100;
-        painter.drawRect(boxX, currentY + 8, 20, 20);
+        // Card BG
+        painter.setBrush(QColor(255, 255, 255, 10));
+        painter.drawRoundedRect(cardX, currentY, cardWidth, 60, 5, 5);
 
+        // Indicator
+        painter.setBrush(baseColors[cat]);
+        painter.drawRect(cardX + 10, currentY + 15, 6, 30);
+
+        // Text
         painter.setPen(Qt::white);
-        painter.drawText(boxX + 30, currentY + 24, name);
+        painter.setFont(QFont("Segoe UI", 16, QFont::Medium));
+        painter.drawText(cardX + 30, currentY + 38, name);
 
-        QFont percentFont("Segoe UI", 18, QFont::Bold);
-        painter.setFont(percentFont);
-        painter.setPen(platformColors[cat].lighter(120));
-        QString percentStr = QString("%1%").arg(QString::number(percent, 'f', 1));
-        painter.drawText(width - 120, currentY + 24, percentStr);
+        // Percentage
+        painter.setFont(QFont("Segoe UI", 18, QFont::Bold));
+        painter.setPen(baseColors[cat].lighter(130));
+        painter.drawText(cardX + cardWidth - 100, currentY + 40, QString("%1%").arg(QString::number(percent, 'f', 1)));
 
-        painter.setFont(legendFont);
-        painter.setPen(Qt::white);
-
-        currentY += itemHeight;
+        currentY += 75;
     }
 
-    // --- 5.PC vs consoles war ---
+    // --- 6. PC vs Consoles: Comparison Bar (Lowered to avoid overlap) ---
     int pcPlayers = platformStats.value(PlatformCategory::Steam, 0) + platformStats.value(PlatformCategory::EpicGamesStore, 0);
     int consolePlayers = platformStats.value(PlatformCategory::PlayStation, 0) + platformStats.value(PlatformCategory::Xbox, 0);
+    double pcPct = totalPlayers > 0 ? (pcPlayers * 100.0 / totalPlayers) : 0;
+    double consolePct = totalPlayers > 0 ? (consolePlayers * 100.0 / totalPlayers) : 0;
 
-    double pcPercent = totalPlayers > 0 ? (pcPlayers * 100.0 / totalPlayers) : 0;
-    double consolePercent = totalPlayers > 0 ? (consolePlayers * 100.0 / totalPlayers) : 0;
+    int barY = height - 70; // Moved lower
+    int barWidth = 600;
+    int barX = (width - barWidth) / 2;
+    int barH = 12;
 
-    int summaryY = height - 120;
+    // Background bar
+    painter.setBrush(QColor(255, 255, 255, 20));
+    painter.drawRoundedRect(barX, barY, barWidth, barH, 6, 6);
 
-    painter.setBrush(QColor(45, 48, 52));
-    painter.setPen(Qt::NoPen);
-    painter.drawRoundedRect(100, summaryY, width - 200, 70, 10, 10);
+    // Console segment (Left)
+    int conW = (consolePct / 100.0) * barWidth;
+    painter.setBrush(baseColors[PlatformCategory::PlayStation]);
+    painter.drawRoundedRect(barX, barY, conW, barH, 6, 6);
 
-    painter.setPen(platformColors[PlatformCategory::Steam]);
-    QFont summaryFont("Segoe UI", 16, QFont::Bold);
-    painter.setFont(summaryFont);
-    painter.drawText(120, summaryY + 30, QString("💻 ПК: %1%").arg(QString::number(pcPercent, 'f', 1)));
+    // PC segment (Right)
+    int pcW = (pcPct / 100.0) * barWidth;
+    painter.setBrush(baseColors[PlatformCategory::Steam]);
+    painter.drawRoundedRect(barX + barWidth - pcW, barY, pcW, barH, 6, 6);
 
-    painter.setPen(platformColors[PlatformCategory::PlayStation]);
-    painter.drawText(width - 260, summaryY + 30, QString("🎮 Консоли: %1%").arg(QString::number(consolePercent, 'f', 1)));
+    // Labels (Perfectly aligned BELOW the bar)
+    painter.setFont(QFont("Segoe UI", 12, QFont::Bold));
+    int labelY = barY + barH + 10;
+    int labelHeight = 30;
+
+    painter.setPen(baseColors[PlatformCategory::PlayStation].lighter(150));
+    painter.drawText(barX, labelY, 200, labelHeight, Qt::AlignLeft | Qt::AlignVCenter, "КОНСОЛИ");
+    
+    painter.setPen(baseColors[PlatformCategory::Steam].lighter(150));
+    painter.drawText(barX + barWidth - 200, labelY, 200, labelHeight, Qt::AlignRight | Qt::AlignVCenter, "ПК");
 
     painter.end();
     return image;
@@ -859,75 +834,77 @@ QString BotManager::generateTextPlatformReport(const QMap<PlatformCategory, int>
     QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
     QString timeStr = QDateTime::currentDateTimeUtc().toTimeZone(tz).toString("HH:mm • dd.MM.yyyy");
 
-    QString report = QString(
-        "📊 <b>РАСПРЕДЕЛЕНИЕ ПО ПЛАТФОРМАМ</b>\n"
-        "🕒 %1\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-    ).arg(timeStr);
+    auto fmtPct = [](double pct) -> QString {
+        return "<code>" + QString::number(pct, 'f', 1).rightJustified(4, ' ') + "%</code>";
+    };
+
+    auto fmtNum = [](int val) -> QString {
+        QString s = QString::number(val);
+        for (int i = s.length() - 3; i > 0; i -= 3) s.insert(i, " ");
+        return "<code>" + s + "</code>";
+    };
+
+    const QMap<PlatformCategory, QString> platformIcons = {
+        {PlatformCategory::PlayStation,     "🟦"}, 
+        {PlatformCategory::Xbox,            "🟩"}, 
+        {PlatformCategory::Steam,           "🟧"}, 
+        {PlatformCategory::EpicGamesStore,  "⬜"}
+    };
 
     const QList<PlatformCategory> order = {
         PlatformCategory::PlayStation,
         PlatformCategory::Xbox,
         PlatformCategory::Steam,
-        PlatformCategory::EpicGamesStore,
-        PlatformCategory::Stadia
+        PlatformCategory::EpicGamesStore
     };
 
-    const QMap<PlatformCategory, QString> platformEmoji = {
-        {PlatformCategory::PlayStation, "🟦"},
-        {PlatformCategory::Xbox,        "🟩"},
-        {PlatformCategory::Steam,       "🔵"},
-        {PlatformCategory::EpicGamesStore, "⬜"},
-        {PlatformCategory::Stadia,      "🟥"}
-    };
+    const QString separator = "━━━━━━━━━━━━━━━━━━━━";
+    const QString subSep = "────────────────────";
 
-    // Generate platform list with progress bars
+    QString report = QString(
+        "📊 <b>ДЕТАЛЬНЫЙ ОТЧЕТ: ПЛАТФОРМЫ</b>\n"
+        "%1\n"
+        "🕒 <b>Обновлено:</b> %2\n"
+        "👥 <b>Всего игроков:</b> %3\n\n"
+    ).arg(separator).arg(timeStr).arg(fmtNum(totalPlayers));
+
     for (PlatformCategory cat : order)
     {
         if (!platformStats.contains(cat) || platformStats[cat] <= 0) continue;
 
         int players = platformStats[cat];
-        double percent = totalPlayers > 0 ? (players * 100.0 / totalPlayers) : 0;
-        QString name = platformCategoryToString(cat);
-        QString emoji = platformEmoji.value(cat, "⬜");
+        double pct = (players * 100.0) / totalPlayers;
+        QString name = platformCategoryToString(cat).toUpper();
+        QString icon = platformIcons.value(cat, "▫️");
 
-        // 10-block progress bar
-        int filledBlocks = static_cast<int>(percent / 10);
+        // 10-block bar for each
+        int filled = qRound(pct / 10.0);
+        if (filled == 0 && pct > 1.0) filled = 1;
         QString bar;
-        for (int i = 0; i < 10; ++i)
-        {
-            bar += (i < filledBlocks) ? "🟩" : "⬜";
-        }
+        for (int i = 0; i < 10; ++i) bar += (i < filled) ? icon : "⬛";
 
-        // [+] ONLY PERCENT, no player count
-        report += QString("<b>%1 %2</b>\n%3\n")
-                      .arg(emoji)
-                      .arg(name)
-                      .arg(bar);
-
-        report += QString("<i>📈 %1%</i>\n\n")
-                      .arg(QString::number(percent, 'f', 1));
+        report += QString(
+            "%1 <b>%2</b>\n"
+            "%3 %4\n"
+            "└─ %5 чел.\n\n"
+        ).arg(icon).arg(name).arg(bar).arg(fmtPct(pct)).arg(fmtNum(players));
     }
 
-    // --- PC vs Consoles summary (percentages only) ---
-    int pcPlayers = platformStats.value(PlatformCategory::Steam, 0) + platformStats.value(PlatformCategory::EpicGamesStore, 0);
+    // Console vs PC Summary
     int consolePlayers = platformStats.value(PlatformCategory::PlayStation, 0) + platformStats.value(PlatformCategory::Xbox, 0);
+    int pcPlayers = platformStats.value(PlatformCategory::Steam, 0) + platformStats.value(PlatformCategory::EpicGamesStore, 0);
+    double conPct = (consolePlayers * 100.0) / totalPlayers;
+    double pcPct = (pcPlayers * 100.0) / totalPlayers;
 
-    double pcPercent = totalPlayers > 0 ? (pcPlayers * 100.0 / totalPlayers) : 0;
-    double consolePercent = totalPlayers > 0 ? (consolePlayers * 100.0 / totalPlayers) : 0;
-
-    report += QString("━━━━━━━━━━━━━━━━━━━━\n\n")
-              + QString("<b>💻 ПЛАТФОРМЫ:</b>\n\n")
-              + QString("<b>💻 ПК (Steam + EGS)</b>\n")
-              + QString("📊 <b>%1%</b>\n\n")  // [+] Only percent
-                  .arg(QString::number(pcPercent, 'f', 1))
-              + QString("<b>🎮 Консоли (PS + Xbox)</b>\n")
-              + QString("📊 <b>%1%</b>\n\n")  // [+] Only percent
-                  .arg(QString::number(consolePercent, 'f', 1));
-
-    // Disclaimer
-    report += QString("<i>📈 Данные из Popularity.report — оценка за последние 30 дней.</i>\n")
-              + QString("<i>⚠️ Цифры примерные, не воспринимайте их сверхбуквально.</i>");
+    report += QString(
+        "%1\n"
+        "<b>💻 ГЛОБАЛЬНЫЙ БАЛАНС:</b>\n"
+        "🎮 КОНСОЛИ : %2\n"
+        "💻 ПК      : %3\n"
+        "%4\n"
+        "<i>📈 Источник: Popularity.report</i>\n"
+        "⚠️ <i>Примерные данные за 30 дней.</i>"
+    ).arg(subSep).arg(fmtPct(conPct)).arg(fmtPct(pcPct)).arg(separator);
 
     return report;
 }
@@ -937,123 +914,103 @@ QString BotManager::generateCompactPlatformReport(const QMap<PlatformCategory, i
     QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
     QString timeStr = QDateTime::currentDateTimeUtc().toTimeZone(tz).toString("HH:mm • dd.MM.yyyy");
 
-    QString report;
-    report += "📊 <b>РАСПРЕДЕЛЕНИЕ ПО ПЛАТФОРМАМ</b>\n";
-    report += "🕒 " + timeStr + "\n";
-    report += "━━━━━━━━━━━━━━━━━━━━\n\n";
-
-    // Detail bar
-    const QMap<PlatformCategory, QString> blockColors = {
-        {PlatformCategory::PlayStation,     QString::fromUtf8("🟦")},
-        {PlatformCategory::Xbox,            QString::fromUtf8("🟩")},
-        {PlatformCategory::Steam,           QString::fromUtf8("🟥")},
-        {PlatformCategory::EpicGamesStore,  QString::fromUtf8("⬜")},
-        {PlatformCategory::Stadia,          QString::fromUtf8("🟨")}
+    auto fmtPct = [](double pct) -> QString {
+        QString s = QString::number(pct, 'f', 1);
+        if (pct < 10.0) s = " " + s; // Simple padding for alignment
+        return "<code>" + s + "%</code>";
     };
 
-    // 10-block short bar
-    const QString consoleBlock = QString::fromUtf8("🟦");
-    const QString pcBlock = QString::fromUtf8("🟥");
-    const QString emptyBlock = QString::fromUtf8("⬛");
+    // Emojis for platforms
+    const QMap<PlatformCategory, QString> platformIcons = {
+        {PlatformCategory::PlayStation,     "🟦"}, // Blue
+        {PlatformCategory::Xbox,            "🟩"}, // Green
+        {PlatformCategory::Steam,           "🟧"}, // Orange (better contrast with PS)
+        {PlatformCategory::EpicGamesStore,  "⬜"}, // White
+        {PlatformCategory::Stadia,          "💀"}  // RIP
+    };
 
     const QList<PlatformCategory> order = {
         PlatformCategory::PlayStation,
         PlatformCategory::Xbox,
         PlatformCategory::Steam,
-        PlatformCategory::EpicGamesStore,
-        PlatformCategory::Stadia
+        PlatformCategory::EpicGamesStore
     };
 
-    // === Detail ===
-    const int DETAIL_BLOCKS = 30;
-    QStringList detailBlocks;
+    // 1. Calculate spectrum bar (Restored to 25 blocks for high impact)
+    const int SPECTRUM_BLOCKS = 25;
+    QString spectrumBar;
+    int blocksUsed = 0;
 
-    for (PlatformCategory cat : order)
-    {
+    for (PlatformCategory cat : order) {
         if (!platformStats.contains(cat) || platformStats[cat] <= 0) continue;
-        double percent = totalPlayers > 0 ? (platformStats[cat] * 100.0 / totalPlayers) : 0;
-        int blocks = qRound((percent / 100.0) * DETAIL_BLOCKS);
-        if (blocks == 0 && percent > 0.5) blocks = 1;
-        for (int i = 0; i < blocks; ++i)
-            detailBlocks.append(blockColors.value(cat, emptyBlock));
-    }
-    while (detailBlocks.size() > DETAIL_BLOCKS) detailBlocks.removeLast();
-    while (detailBlocks.size() < DETAIL_BLOCKS) detailBlocks.append(emptyBlock);
-    QString detailBar = detailBlocks.join("");
-
-    // === Short ===
-    const int SUMMARY_BLOCKS = 10;
-    QStringList summaryBlocks;
-
-    int consolePlayers = platformStats.value(PlatformCategory::PlayStation, 0) +
-                         platformStats.value(PlatformCategory::Xbox, 0);
-    int pcPlayers = platformStats.value(PlatformCategory::Steam, 0) +
-                    platformStats.value(PlatformCategory::EpicGamesStore, 0);
-
-    double consolePercent = totalPlayers > 0 ? (consolePlayers * 100.0 / totalPlayers) : 0;
-    double pcPercent = totalPlayers > 0 ? (pcPlayers * 100.0 / totalPlayers) : 0;
-
-    // Calculate console blocks, PC blocks are the remainder to 10
-    // This guarantees exactly 10 blocks without rounding losses
-    int consoleBlocks = qRound((consolePercent / 100.0) * SUMMARY_BLOCKS);
-    int pcBlocks = SUMMARY_BLOCKS - consoleBlocks;
-
-    // Minimum 1 block for each category if there are players
-    if (consoleBlocks == 0 && consolePercent > 0) {
-        consoleBlocks = 1;
-        pcBlocks = SUMMARY_BLOCKS - consoleBlocks;
-    }
-    if (pcBlocks == 0 && pcPercent > 0) {
-        pcBlocks = 1;
-        consoleBlocks = SUMMARY_BLOCKS - pcBlocks;
-    }
-
-    // Boundary protection (in case both categories have players but one dominates)
-    if (consoleBlocks < 0) consoleBlocks = 0;
-    if (pcBlocks < 0) pcBlocks = 0;
-    if (consoleBlocks + pcBlocks > SUMMARY_BLOCKS) {
-        // If sum exceeds 10, reduce the larger category
-        if (consoleBlocks > pcBlocks) {
-            consoleBlocks = SUMMARY_BLOCKS - pcBlocks;
-        } else {
-            pcBlocks = SUMMARY_BLOCKS - consoleBlocks;
+        double pct = (platformStats[cat] * 100.0) / totalPlayers;
+        int blocks = qRound((pct / 100.0) * SPECTRUM_BLOCKS);
+        if (blocks == 0 && pct > 1.0) blocks = 1; 
+        
+        for (int i = 0; i < blocks && blocksUsed < SPECTRUM_BLOCKS; ++i) {
+            spectrumBar += platformIcons.value(cat);
+            blocksUsed++;
         }
     }
-
-    for (int i = 0; i < consoleBlocks; ++i) summaryBlocks.append(consoleBlock);
-    for (int i = 0; i < pcBlocks; ++i) summaryBlocks.append(pcBlock);
-
-    while (summaryBlocks.size() > SUMMARY_BLOCKS) summaryBlocks.removeLast();
-    while (summaryBlocks.size() < SUMMARY_BLOCKS) summaryBlocks.append(emptyBlock);
-    QString summaryBar = summaryBlocks.join("");
-
-
-    report += "<b>Платформы:</b>\n";
-    report += detailBar + "\n\n";
-
-    report += "<b>Детализация:</b>\n";
-    for (PlatformCategory cat : order)
-    {
-        if (!platformStats.contains(cat) || platformStats[cat] <= 0) continue;
-        double percent = totalPlayers > 0 ? (platformStats[cat] * 100.0 / totalPlayers) : 0;
-        QString name = platformCategoryToString(cat);
-        QString colorBlock = blockColors.value(cat, emptyBlock);
-        report += colorBlock + " <b>" + name + "</b>: " + QString::number(percent, 'f', 1) + "%\n";
+    while (blocksUsed < SPECTRUM_BLOCKS) {
+        spectrumBar += "⬛";
+        blocksUsed++;
     }
-    report += "\n";
 
-    report += "<b>ПК / Консоли:</b>\n";
-    report += summaryBar + "\n\n";
+    // 2. Build detailed list (Removed mini-bars for mobile fit)
+    QString detailLines;
+    for (PlatformCategory cat : order) {
+        if (!platformStats.contains(cat) || platformStats[cat] <= 0) continue;
+        double pct = (platformStats[cat] * 100.0) / totalPlayers;
+        
+        detailLines += QString("%1 %2 : %3\n")
+            .arg(platformIcons.value(cat))
+            .arg(platformCategoryToString(cat).leftJustified(12, ' '))
+            .arg(fmtPct(pct));
+    }
 
-    report += "<b>Сводка:</b>\n";
-    report += consoleBlock + " <b>Консоли (PS + Xbox)</b>: " + QString::number(consolePercent, 'f', 1) + "%\n";
-    report += pcBlock + " <b>ПК (Steam + EGS)</b>: " + QString::number(pcPercent, 'f', 1) + "%\n\n";
+    // 3. PC vs Consoles Duel
+    int consolePlayers = platformStats.value(PlatformCategory::PlayStation, 0) + platformStats.value(PlatformCategory::Xbox, 0);
+    int pcPlayers = platformStats.value(PlatformCategory::Steam, 0) + platformStats.value(PlatformCategory::EpicGamesStore, 0);
+    double consolePct = (consolePlayers * 100.0) / totalPlayers;
+    double pcPct = (pcPlayers * 100.0) / totalPlayers;
 
-    report += "━━━━━━━━━━━━━━━━━━━━\n";
-    report += "<i>📈 Данные из Popularity.report — оценка за последние 30 дней.</i>\n";
-    report += "<i>⚠️ Цифры примерные, не воспринимайте их сверхбуквально.</i>";
+    const int DUEL_BLOCKS = 10;
+    int consoleDuelBlocks = qRound((consolePct / 100.0) * DUEL_BLOCKS);
+    if (consoleDuelBlocks == 0 && consolePct > 0) consoleDuelBlocks = 1;
+    if (consoleDuelBlocks == DUEL_BLOCKS && pcPct > 0) consoleDuelBlocks = DUEL_BLOCKS - 1;
+    
+    QString duelBar;
+    for (int i = 0; i < DUEL_BLOCKS; ++i) duelBar += (i < consoleDuelBlocks) ? "🟦" : "🟧";
 
-    return report;
+    const QString separator = "━━━━━━━━━━━━━━━━━━━━";
+
+    return QString(
+        "📊 <b>РАСПРЕДЕЛЕНИЕ: DESTINY 2</b>\n"
+        "%1\n"
+        "🕒 %2\n"
+        "\n"
+        "<b>СПЕКТР ПЛАТФОРМ:</b>\n"
+        "%3\n"
+        "\n"
+        "<b>ДЕТАЛИЗАЦИЯ:</b>\n"
+        "%4\n"
+        "<b>ДУЭЛЬ: КОНСОЛИ VS ПК</b>\n"
+        "%5\n"
+        "🎮 Consoles : [%6]\n"
+        "💻 PC       : [%7]\n"
+        "\n"
+        "%8\n"
+        "<i>📈 Данные: Popularity.report (30 дней).</i>\n"
+        "⚠️ <i>Оценка примерная, погрешность ±5%.</i>"
+    ).arg(separator)
+     .arg(timeStr)
+     .arg(spectrumBar)
+     .arg(detailLines)
+     .arg(duelBar)
+     .arg(fmtPct(consolePct))
+     .arg(fmtPct(pcPct))
+     .arg(separator);
 }
 
 

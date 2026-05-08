@@ -6,6 +6,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 option(USE_GUI_CHARTS "Enable QImage/QPainter chart generation" OFF)
+#set(USE_GUI_CHARTS ON CACHE BOOL "Enable QImage/QPainter chart generation" FORCE)
 message(STATUS "DEBUG: USE_GUI_CHARTS is set to: ${USE_GUI_CHARTS}")
 
 find_package(Qt6 REQUIRED COMPONENTS Core Network)
