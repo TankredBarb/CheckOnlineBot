@@ -58,8 +58,6 @@ private:
     bool validateJsonResponse(QNetworkReply* reply, QJsonDocument& doc, QString& error);
 
     QNetworkAccessManager m_net;
-    int m_currentRequestId = 0;
-    QString m_currentSlug;
 
     static constexpr int REQUEST_TIMEOUT_MS = 8000;
 };

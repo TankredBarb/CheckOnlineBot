@@ -117,7 +117,6 @@ private:
     // --- Request State ---
     QMap<int, RequestContext> m_pendingRequests;
     int m_requestCounter = 0;
-    bool m_fetching = false;
 
     // --- Caches ---
     QMap<int, QMap<int, int>> m_steamCache;

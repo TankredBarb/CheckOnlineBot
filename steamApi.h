@@ -31,7 +31,4 @@ private:
     int parsePlayerCount(QNetworkReply* reply, QString& error);
 
     QNetworkAccessManager m_net;
-    int m_pendingRequestsCount = 0;      // Number of pending API responses
-    QMap<int, int> m_pendingResults;     // Accumulated results: appId -> playerCount
-    int m_currentRequestId = 0;          // ID of the current batch request
 };

@@ -221,13 +221,6 @@ void BotManager::handleCallbackQuery(const QString& callbackQueryId, const QStri
 
 void BotManager::fetchAndBroadcast(const RequestContext& context)
 {
-    if (m_fetching)
-    {
-        qDebug() << "[BotManager] Request in progress, ignoring new one.";
-        return;
-    }
-
-    m_fetching = true;
     m_requestCounter++;
     m_pendingRequests[m_requestCounter] = context;
 
@@ -333,8 +326,6 @@ void BotManager::onPopularityDataReady(int players, const QString& error, QStrin
 
 void BotManager::onPlatformDistributionDataReady(const QMap<PlatformCategory, int>& platformStats, int requestId)
 {
-    m_fetching = false;
-
     if (!m_pendingRequests.contains(requestId))
     {
         qDebug() << "[BotManager] Platform request" << requestId << "not found (expired?)";
@@ -349,8 +340,6 @@ void BotManager::onPlatformDistributionDataReady(const QMap<PlatformCategory, in
 // --- Uptime ---
 void BotManager::sendUptimeReport(int requestId)
 {
-    m_fetching = false;
-
     if (!m_pendingRequests.contains(requestId))
     {
         qWarning() << "[BotManager] Uptime request" << requestId << "not found in pending requests";
@@ -390,8 +379,6 @@ void BotManager::sendUptimeReport(int requestId)
 // --- Player Count ---
 void BotManager::sendReport(int requestId)
 {
-    m_fetching = false;
-
     if (!m_pendingRequests.contains(requestId))
         return;
 
@@ -425,8 +412,6 @@ void BotManager::sendReport(int requestId)
 // --- Short Stats ---
 void BotManager::sendShortReport(int requestId)
 {
-    m_fetching = false;
-
     if (!m_pendingRequests.contains(requestId))
         return;
 
@@ -687,10 +672,11 @@ QString BotManager::formatPlatformReport(const QMap<PlatformCategory, int>& plat
 void BotManager::sendPlatformReport(int requestId, const QMap<PlatformCategory, int>& platformStats)
 {
     if (!m_pendingRequests.contains(requestId)) return;
-    RequestContext ctx = m_pendingRequests[requestId];
+    RequestContext ctx = m_pendingRequests.take(requestId);
 
     int totalPlayers = 0;
     for (int count : platformStats) totalPlayers += count;
+
 
 #ifdef USE_GUI_CHARTS
     bool useGui = Config::USE_GUI; // Or check env variable
@@ -734,7 +720,6 @@ void BotManager::sendPlatformReport(int requestId, const QMap<PlatformCategory, 
     QTimer::singleShot(300000, this, [this, requestId]() {
         m_pendingRequests.remove(requestId);
     });
-    m_fetching = false;
 }
 
 #ifdef USE_GUI_CHARTS

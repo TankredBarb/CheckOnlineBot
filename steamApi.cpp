@@ -12,9 +12,12 @@ SteamApi::SteamApi(QObject* parent) : QObject(parent)
 
 void SteamApi::requestCurrentPlayers(const QList<int>& appIds, int requestId)
 {
-    m_pendingRequestsCount = appIds.size();
-    m_pendingResults.clear();
-    m_currentRequestId = requestId;
+    // Create a container for results that will be shared across all replies for THIS requestId
+    // We use a shared pointer-like approach with a QObject to manage its lifetime
+    auto* requestState = new QObject(this);
+    requestState->setProperty("requestId", requestId);
+    requestState->setProperty("pendingCount", appIds.size());
+    requestState->setProperty("results", QVariant::fromValue(QMap<int, int>()));
 
     for (int appId : appIds)
     {
@@ -28,6 +31,7 @@ void SteamApi::requestCurrentPlayers(const QList<int>& appIds, int requestId)
 
         QNetworkReply* reply = m_net.get(request);
         reply->setProperty("appId", appId);
+        reply->setProperty("statePtr", QVariant::fromValue(requestState));
         connect(reply, &QNetworkReply::finished, this, &SteamApi::onSteamReplyFinished);
     }
 }
@@ -75,23 +79,35 @@ int SteamApi::parsePlayerCount(QNetworkReply* reply, QString& error)
 void SteamApi::onSteamReplyFinished()
 {
     auto* reply = qobject_cast<QNetworkReply*>(sender());
-    if (!reply)
-        return;
+    if (!reply) return;
 
     int appId = reply->property("appId").toInt();
-    QString error;
+    auto* requestState = reply->property("statePtr").value<QObject*>();
+    
+    if (!requestState) {
+        reply->deleteLater();
+        return;
+    }
 
+    int requestId = requestState->property("requestId").toInt();
+    int pendingCount = requestState->property("pendingCount").toInt();
+    QMap<int, int> results = requestState->property("results").value<QMap<int, int>>();
+
+    QString error;
     int players = parsePlayerCount(reply, error);
 
-    if (players >= 0)
-    {
-        m_pendingResults[appId] = players;
+    if (players >= 0) {
+        results[appId] = players;
+        requestState->setProperty("results", QVariant::fromValue(results));
     }
 
     reply->deleteLater();
 
-    if (--m_pendingRequestsCount <= 0)
-    {
-        emit playersDataReady(m_pendingResults, error, m_currentRequestId);
+    pendingCount--;
+    requestState->setProperty("pendingCount", pendingCount);
+
+    if (pendingCount <= 0) {
+        emit playersDataReady(results, error, requestId);
+        requestState->deleteLater();
     }
 }

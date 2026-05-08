@@ -66,13 +66,12 @@ bool PopularityApi::validateJsonResponse(QNetworkReply* reply, QJsonDocument& do
 
 void PopularityApi::requestCrossPlatformPlayer(const QString& gameSlug, int requestId)
 {
-    m_currentRequestId = requestId;
-    m_currentSlug = gameSlug;
-
     QUrl url(Config::POPULARITY_API_URL);
     QNetworkRequest request = createRequest(url);
 
     QNetworkReply* reply = m_net.get(request);
+    reply->setProperty("requestId", requestId);
+    reply->setProperty("gameSlug", gameSlug);
     connect(reply, &QNetworkReply::finished, this, &PopularityApi::onPopularityReplyFinished);
 }
 
@@ -81,6 +80,9 @@ void PopularityApi::onPopularityReplyFinished()
     auto* reply = qobject_cast<QNetworkReply*>(sender());
     if (!reply)
         return;
+
+    int requestId = reply->property("requestId").toInt();
+    QString gameSlug = reply->property("gameSlug").toString();
 
     QString error;
     int players = -1;
@@ -107,7 +109,7 @@ void PopularityApi::onPopularityReplyFinished()
     }
 
     reply->deleteLater();
-    emit popularityDataReady(players, error, m_currentSlug, m_currentRequestId);
+    emit popularityDataReady(players, error, gameSlug, requestId);
 }
 
 void PopularityApi::requestPlatformDistribution(int requestId)
