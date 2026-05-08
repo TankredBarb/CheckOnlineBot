@@ -1,10 +1,12 @@
 #include "telegramClient.h"
 #include "config.h"
 #include <QUrl>
+#include <QUrlQuery>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QRegularExpression>
 #include <QTimer>
+#include <QHttpMultiPart>
 
 TelegramClient::TelegramClient(const QString& token, QObject* parent)
     : QObject(parent)
@@ -23,7 +25,8 @@ void TelegramClient::fetchUpdates()
     QMap<QString, QString> params;
     params["offset"] = QString::number(m_offset);
     params["timeout"] = "30";
-    sendRequest("getUpdates", params);
+    // 45s timeout for polling (30s server-side + 15s margin)
+    sendRequest("getUpdates", params, 45000);
 }
 
 void TelegramClient::sendMessage(qint64 chatId, const QString& text, qint64 messageThreadId, const QJsonObject& replyMarkup)
@@ -59,22 +62,19 @@ void TelegramClient::answerCallbackQuery(const QString& callbackQueryId, const Q
     sendRequest("answerCallbackQuery", params);
 }
 
-void TelegramClient::sendRequest(const QString& method, const QMap<QString, QString>& params)
+void TelegramClient::sendRequest(const QString& method, const QMap<QString, QString>& params, int timeoutMs)
 {
-    QUrl url("https://api.telegram.org/bot" + m_token + "/" + method);
-
+    QUrl url(QString("https://api.telegram.org/bot%1/%2").arg(m_token, method));
     QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
+    request.setTransferTimeout(timeoutMs);
 
-    QJsonObject jsonObj;
+    QUrlQuery query;
     for (auto it = params.begin(); it != params.end(); ++it)
-    {
-        jsonObj[it.key()] = it.value();
-    }
+        query.addQueryItem(it.key(), it.value());
 
-    QJsonDocument doc(jsonObj);
-    QNetworkReply* reply = m_net.post(request, doc.toJson(QJsonDocument::Compact));
-
+    QNetworkReply* reply = m_net.post(request, query.toString(QUrl::FullyEncoded).toUtf8());
+    
     if (method == "getUpdates")
         connect(reply, &QNetworkReply::finished, this, &TelegramClient::onPollReplyFinished);
     else
@@ -195,8 +195,9 @@ void TelegramClient::sendPhoto(qint64 chatId, const QByteArray& pngData, const Q
     photoPart.setBody(pngData);
     multiPart->append(photoPart);
 
-    QUrl url(QString("https://api.telegram.org/bot%1/sendPhoto").arg(Config::TG_TOKEN));
+    QUrl url(QString("https://api.telegram.org/bot%1/sendPhoto").arg(m_token));
     QNetworkRequest request(url);
+    request.setTransferTimeout(30000); // 30s timeout for photos
 
     QNetworkReply* reply = m_net.post(request, multiPart);
     multiPart->setParent(reply);

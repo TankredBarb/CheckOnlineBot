@@ -384,14 +384,12 @@ void BotManager::sendReport(int requestId)
 
     RequestContext ctx = m_pendingRequests[requestId];
     auto steamData = m_steamCache.take(requestId);
-    int popData = m_popularityCache.value(requestId, -1);
-    m_popularityCache.remove(requestId);
+    
+    // Ensure we use -1 if the result is missing from cache
+    int popData = m_popularityCache.contains(requestId) ? m_popularityCache.take(requestId) : -1;
 
-    QString steamErr = m_steamErrorCache.value(requestId, "");
-    m_steamErrorCache.remove(requestId);
-
-    QString popErr = m_popErrorCache.value(requestId, "");
-    m_popErrorCache.remove(requestId);
+    QString steamErr = m_steamErrorCache.take(requestId);
+    QString popErr = m_popErrorCache.take(requestId);
 
     if (ctx.chatId != 0)
     {

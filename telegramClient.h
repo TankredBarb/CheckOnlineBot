@@ -35,7 +35,7 @@ private slots:
 
 private:
     void fetchUpdates();
-    void sendRequest(const QString& method, const QMap<QString, QString>& params);
+    void sendRequest(const QString& method, const QMap<QString, QString>& params, int timeoutMs = 15000);
     void processUpdate(const QJsonObject& update);
 
     QNetworkAccessManager m_net;
