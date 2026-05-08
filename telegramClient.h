@@ -34,6 +34,7 @@ private slots:
     void onSendReplyFinished();
 
 private:
+    void fetchUpdates();
     void sendRequest(const QString& method, const QMap<QString, QString>& params);
     void processUpdate(const QJsonObject& update);
 

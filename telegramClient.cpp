@@ -14,16 +14,16 @@ TelegramClient::TelegramClient(const QString& token, QObject* parent)
 
 void TelegramClient::startPolling()
 {
-    QTimer* timer = new QTimer(this);
-    connect(timer, &QTimer::timeout, this, [this]
-    {
-        QMap<QString, QString> params;
-        params["offset"] = QString::number(m_offset);
-        params["timeout"] = "30";
-        sendRequest("getUpdates", params);
-    });
-    timer->start(1000);
     qDebug() << "[TelegramClient] Polling started.";
+    fetchUpdates();
+}
+
+void TelegramClient::fetchUpdates()
+{
+    QMap<QString, QString> params;
+    params["offset"] = QString::number(m_offset);
+    params["timeout"] = "30";
+    sendRequest("getUpdates", params);
 }
 
 void TelegramClient::sendMessage(qint64 chatId, const QString& text, qint64 messageThreadId, const QJsonObject& replyMarkup)
@@ -98,7 +98,15 @@ void TelegramClient::onPollReplyFinished()
             }
         }
     }
+    else
+    {
+        qWarning() << "[TelegramClient] Poll error:" << reply->errorString();
+    }
+
     reply->deleteLater();
+
+    // Schedule next poll only after current one is finished
+    QTimer::singleShot(1000, this, &TelegramClient::fetchUpdates);
 }
 
 void TelegramClient::onSendReplyFinished()
