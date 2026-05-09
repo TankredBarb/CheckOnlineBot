@@ -354,6 +354,7 @@ void BotManager::sendUptimeReport(int requestId)
         QDateTime start = m_uptime.startTime();
         QTimeZone tz(Config::KYIV_TIMEZONE.toUtf8());
         QString localStart = start.toTimeZone(tz).toString("HH:mm • dd.MM.yyyy");
+        QString hostInfo = QString("%1 %2 %3").arg(QSysInfo::prettyProductName()).arg(QSysInfo::buildAbi()).arg(QSysInfo::kernelType());
 
         const QString separator = "━━━━━━━━━━━━━━━━━━━━";
 
@@ -362,9 +363,10 @@ void BotManager::sendUptimeReport(int requestId)
             "%1\n"
             "🕐 Работает: <b>%2</b>\n"
             "📅 Запуск: <code>%3</code>\n"
-            "%4\n"
-            "<i>Все данные по Киевскому времени (UTC+3)</i>"
-        ).arg(separator).arg(uptimeStr).arg(localStart).arg(separator);
+            "🖥 Хост: <code>%4</code>\n"
+            "%5\n"
+            "<i>Все данные по (UTC&#43;3)</i>"
+        ).arg(separator).arg(uptimeStr).arg(localStart).arg(hostInfo).arg(separator);
 
         m_tg->sendMessage(ctx.chatId, reply, ctx.topicId);
         qDebug() << "[BotManager] Uptime sent for request" << requestId;
